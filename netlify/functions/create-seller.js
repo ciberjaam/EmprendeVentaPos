@@ -1,78 +1,103 @@
-// `fetch` es global en Node 18+, no se requiere importar `node-fetch`.
+// `fetch` is provided by the Node 18 runtime. We intentionally avoid
+// importing node-fetch here to reduce bundle size.  This function
+// creates or promotes a user to a seller by interacting with the
+// Supabase management API.  It is invoked by the frontend when an
+// administrator registers a new vendor without using the Supabase UI.
 
 /*
- * Serverless function to create a new seller (usuario con rol 'seller').
- * Este endpoint se invoca desde el frontend cuando un administrador desea
- * registrar a un nuevo vendedor sin tener que acceder al panel de Supabase.
+ * Environment variables required:
+ *   - SUPABASE_URL: base URL of the Supabase project (e.g. https://xyz.supabase.co)
+ *   - SUPABASE_SERVICE_ROLE_KEY: service role API key with admin privileges
  *
- * Requiere que en las variables de entorno estén definidos:
- *   - SUPABASE_URL: la URL base del proyecto Supabase, por ejemplo
- *     https://xyzcompany.supabase.co
- *   - SUPABASE_SERVICE_ROLE_KEY: la clave de servicio de Supabase con
- *     permisos administrativos. Esta clave nunca se expone al frontend.
- *
- * El flujo que implementa es:
- *   1. Crear un usuario usando la API de administración de auth de Supabase
- *      mediante una llamada POST a /auth/v1/admin/users con email y password.
- *   2. Esperar brevemente para que el trigger de Supabase cree el perfil
- *      predeterminado con rol 'buyer'.
- *   3. Actualizar la fila en la tabla 'profiles' para establecer el rol
- *      'seller'. Utiliza la API REST de Supabase (servicio de PostgREST).
+ * Flow implemented:
+ *   1. Attempt to create a new auth user via POST /auth/v1/admin/users
+ *   2. If the user already exists (422) or an ID isn't returned, perform a
+ *      lookup by email to obtain the existing user ID.
+ *   3. Upsert a row into the `profiles` table with the obtained user ID
+ *      and the role set to 'seller'.  Using an upsert (Prefer:
+ *      resolution=merge-duplicates) ensures the role is overwritten if the
+ *      profile already exists and gracefully handles the situation where the
+ *      trigger that creates a profile has not yet fired.
  */
 
 exports.handler = async (event) => {
+  // Only POST requests are accepted.  Respond with 405 for others.
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
   try {
+    // Parse incoming JSON body
     const { email, password } = JSON.parse(event.body || '{}');
     if (!email || !password) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Email y contraseña son obligatorios' }) };
     }
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const SUPABASE_URL  = process.env.SUPABASE_URL;
+    const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!SUPABASE_URL || !SERVICE_KEY) {
       return { statusCode: 500, body: JSON.stringify({ error: 'Variables de entorno faltantes' }) };
     }
-    // Paso 1: crear usuario
-    const createUserRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+
+    // 1. Attempt to create the user.  If the user already exists (status 422) the
+    //    returned JSON may not include an id, so we handle that separately below.
+    const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'apikey': SERVICE_KEY,
-        'Authorization': `Bearer ${SERVICE_KEY}`
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ email, password, email_confirm: true })
     });
-    const createUserData = await createUserRes.json();
-    if (!createUserRes.ok) {
-      const errorMsg = createUserData?.message || createUserData?.error || 'Error creando usuario';
-      return { statusCode: createUserRes.status, body: JSON.stringify({ error: errorMsg }) };
+    let createJson;
+    try {
+      createJson = await createRes.json();
+    } catch (_) {
+      createJson = {};
     }
-    const userId = createUserData.user?.id;
-    if (!userId) {
-      return { statusCode: 500, body: JSON.stringify({ error: 'No se pudo obtener ID del usuario' }) };
+    let userId = createJson?.user?.id || createJson?.id || null;
+
+    // 2. If a user ID was not returned or the create call returned a 422, lookup
+    //    the user by email.  This handles the case where the user already
+    //    exists.  Without this, the function would return an error when
+    //    attempting to create a duplicate user.
+    if (createRes.status === 422 || !userId) {
+      const lookupRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
+        headers: {
+          apikey: SERVICE_KEY,
+          Authorization: `Bearer ${SERVICE_KEY}`
+        }
+      });
+      const lookupJson = await lookupRes.json();
+      // Supabase returns either an array of users or an object with a user
+      userId = lookupJson?.[0]?.id || lookupJson?.user?.id || null;
+      if (!userId) {
+        return { statusCode: 422, body: JSON.stringify({ error: 'No se pudo obtener ID de usuario' }) };
+      }
     }
-    // Espera breve para que el trigger cree la fila del perfil
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    // Paso 2: actualizar rol a 'seller'
-    const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
-      method: 'PATCH',
+
+    // 3. Upsert into profiles with role 'seller'.  Using a POST with
+    //    Prefer: resolution=merge-duplicates means that if a profile exists
+    //    (perhaps created by a trigger with a default role of buyer) it will
+    //    be merged and the role will be updated to seller.  If a profile does
+    //    not yet exist, this call will create it.  This avoids timing issues
+    //    related to waiting for triggers.
+    const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+      method: 'POST',
       headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
         'Content-Type': 'application/json',
-        'apikey': SERVICE_KEY,
-        'Authorization': `Bearer ${SERVICE_KEY}`,
-        'Prefer': 'return=representation'
+        Prefer: 'resolution=merge-duplicates'
       },
-      body: JSON.stringify({ role: 'seller' })
+      body: JSON.stringify({ id: userId, role: 'seller' })
     });
-    const updateData = await updateRes.json();
-    if (!updateRes.ok) {
-      const errMsg = updateData?.message || updateData?.error || 'Error actualizando rol';
-      return { statusCode: updateRes.status, body: JSON.stringify({ error: errMsg }) };
+    if (!upsertRes.ok) {
+      const errText = await upsertRes.text();
+      return { statusCode: 500, body: JSON.stringify({ error: 'Falló al asignar rol seller', detail: errText }) };
     }
+
     return { statusCode: 200, body: JSON.stringify({ message: 'Vendedor creado', userId }) };
   } catch (err) {
-    return { statusCode: 500, body: JSON.stringify({ error: err.message || 'Internal Server Error' }) };
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
