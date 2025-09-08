@@ -55,7 +55,17 @@
         .header { background-color: var(--bg-secondary); box-shadow: var(--header-shadow); border-bottom: 1px solid var(--border-color); }
         .drawer { transition: transform 0.3s ease-in-out; background-color: var(--bg-secondary); }
         .drawer.open { transform: translateX(0); } .drawer.closed { transform: translateX(100%); }
-        .modal-overlay-bg { background-color: var(--modal-overlay); }
+        /*
+         * Overlay background for modals.  In addition to the theme‑dependent
+         * colour defined by `--modal-overlay`, we add a slight blur to the
+         * backdrop to improve contrast and focus on the modal content.  This
+         * resolves issues where confirm and WhatsApp choice dialogues appear
+         * overly transparent and distracting.
+         */
+        .modal-overlay-bg {
+            background-color: var(--modal-overlay);
+            backdrop-filter: blur(4px);
+        }
 
         .btn { @apply font-bold py-2 px-4 rounded-lg transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed; }
         .btn-primary { background-color: var(--primary-color); color: white; }
@@ -476,14 +486,20 @@
             -- Helper function to decrement stock for non‑service products when
             -- recording a sale.  This function is invoked from the client code
             -- after a successful sale.
+            -- The decrement_stock function now runs with SECURITY DEFINER so
+            -- that it can update the productos table on behalf of sellers.
+            -- Without SECURITY DEFINER, row‑level security would prevent
+            -- sellers from decrementing stock (only admins could update).
             CREATE OR REPLACE FUNCTION decrement_stock(product_id TEXT, decrement_value NUMERIC)
-            RETURNS void AS $$
+            RETURNS void
+            LANGUAGE plpgsql
+            SECURITY DEFINER AS $$
             BEGIN
                 UPDATE productos
                 SET stock = stock - decrement_value
                 WHERE id = product_id AND is_service = FALSE;
             END;
-            $$ LANGUAGE plpgsql;
+            $$;
 
             -- Enable row level security (RLS) on all tables.  Without RLS
             -- policies, no authenticated user can access table rows.
