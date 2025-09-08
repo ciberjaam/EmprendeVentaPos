@@ -1508,10 +1508,12 @@
                 }
                 let filteredSales = sales;
                 if (paymentFilter) {
+                    // Permitir coincidencias parciales: por ejemplo, "efectivo" coincidirá con "efectivo_usd" y "efectivo_bs".
+                    const normalizedFilter = paymentFilter.toLowerCase();
                     filteredSales = sales.filter(sale => {
                         try {
                             const methods = sale.payment_methods || {};
-                            return Object.keys(methods).some(key => key.toLowerCase() === paymentFilter);
+                            return Object.keys(methods).some(key => key.toLowerCase().includes(normalizedFilter));
                         } catch {
                             return false;
                         }
