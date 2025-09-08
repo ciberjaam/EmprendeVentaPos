@@ -156,23 +156,18 @@
             <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                 <h2 class="text-2xl font-bold">Catálogo</h2>
                 <div class="flex items-center gap-2">
-                    <button id="view-toggle-btn" class="btn btn-secondary p-2 h-10 w-10" title="Cambiar vista">
+                     <button id="view-toggle-btn" class="btn btn-secondary text-sm p-2 h-10 w-10">
                         <i class="fas fa-grip-vertical"></i>
                     </button>
-                    <button id="btn-manage-products" class="btn btn-primary flex items-center gap-1 py-2 px-3 rounded-md text-sm" title="Gestionar catálogo">
-                        <i class="fas fa-boxes-stacked"></i>
-                        <span>Catalogo</span>
-                    </button>
-                    <!-- Botón para que el administrador cree vendedores directamente desde la app -->
-                    <button id="btn-create-seller" class="btn btn-primary flex items-center gap-1 py-2 px-3 rounded-md text-sm" title="Crear vendedor">
-                        <i class="fas fa-user-plus"></i>
-                        <span>Vendedor</span>
-                    </button>
-                    <!-- Botón para gestionar vendedores: listar, editar o eliminar -->
-                    <button id="btn-manage-sellers" class="btn btn-primary flex items-center gap-1 py-2 px-3 rounded-md text-sm" title="Gestionar vendedores">
-                        <i class="fas fa-users"></i>
-                        <span>Vendedores</span>
-                    </button>
+                    <button id="btn-manage-products" class="btn btn-secondary text-sm">Gestionar Catálogo</button>
+                    <div class="relative inline-block">
+                      <button id="btn-vendedores" class="btn btn-secondary text-sm">Vendedores</button>
+                      <div id="menu-vendedores" class="hidden absolute right-0 mt-2 w-56 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+                        <button id="act-crear-vendedor" class="w-full text-left px-4 py-2 hover:bg-gray-100">➕ Crear vendedor</button>
+                        <button id="act-gestionar-vendedores" class="w-full text-left px-4 py-2 hover:bg-gray-100">📋 Gestionar vendedores</button>
+                      </div>
+                    </div>
+
                 </div>
             </div>
             <div id="category-filters" class="mb-4 flex gap-2 overflow-x-auto pb-2"></div>
@@ -256,8 +251,6 @@
                 </div>
 
                  <div class="flex-grow overflow-y-auto pt-4">
-                    <!-- Buscador para filtrar productos dentro de la gestión. Ayuda a encontrar rápido sin hacer scroll -->
-                    <input type="text" id="product-manage-search" placeholder="Buscar producto" class="w-full p-2 mb-3 border border-border-color rounded-md text-sm" />
                     <div id="product-list-container">
                         <!-- Product list will be rendered here -->
                     </div>
@@ -331,39 +324,6 @@
                  <div id="gemini-modal-footer" class="mt-4 text-right"><button type="button" class="btn-close-modal btn btn-secondary">Cerrar</button></div>
              </div>
         </div>
-
-        <!-- Modal para crear vendedores. Visible sólo para administradores. -->
-        <div id="create-seller-modal" class="modal-content hidden">
-             <form id="create-seller-form" class="p-6 rounded-lg shadow-xl w-full max-w-sm">
-                 <h3 class="text-2xl font-bold mb-4">Crear Vendedor</h3>
-                 <div class="mb-4">
-                     <label for="seller-email" class="block text-sm font-medium text-text-secondary">Email</label>
-                     <input type="email" id="seller-email" required class="modal-input">
-                 </div>
-                 <div class="mb-6">
-                     <label for="seller-password" class="block text-sm font-medium text-text-secondary">Contraseña</label>
-                     <input type="password" id="seller-password" required class="modal-input">
-                 </div>
-                 <button type="submit" class="w-full btn btn-primary">Crear</button>
-                 <button type="button" class="w-full btn-close-modal btn btn-secondary mt-2">Cancelar</button>
-             </form>
-        </div>
-        <!-- Modal to manage sellers (list, edit, delete) for administrators -->
-        <div id="seller-management-modal" class="modal-content hidden">
-             <div class="p-6 rounded-lg shadow-xl w-full max-w-md h-[90vh] flex flex-col">
-                 <div class="flex justify-between items-center mb-4">
-                     <h3 class="text-2xl font-bold">Gestionar Vendedores</h3>
-                 </div>
-                 <!-- Search bar for filtering sellers by email -->
-                 <input type="text" id="seller-search" placeholder="Buscar vendedor" class="w-full p-2 mb-3 border border-border-color rounded-md text-sm" />
-                 <div id="seller-list-container" class="flex-grow overflow-y-auto space-y-2">
-                     <!-- List of sellers will be rendered here -->
-                 </div>
-                 <div class="mt-4 text-right">
-                     <button type="button" class="btn-close-modal btn btn-secondary">Cerrar</button>
-                 </div>
-             </div>
-        </div>
     </div>
     
     <div id="toast" class="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg opacity-0 transition-opacity duration-300 max-w-md text-center">
@@ -388,166 +348,22 @@
         ];
 
         const fullSqlScript = `
-            -- Cleanup existing objects to avoid conflicts when re‑initialising the database.
             DROP FUNCTION IF EXISTS decrement_stock(text, numeric);
-            DROP FUNCTION IF EXISTS is_admin_user(uuid) CASCADE;
-            DROP FUNCTION IF EXISTS create_profile_for_new_user() CASCADE;
-            DROP TABLE IF EXISTS venta_items;
-            DROP TABLE IF EXISTS ventas CASCADE;
+            DROP TABLE IF EXISTS venta_items; 
+            DROP TABLE IF EXISTS ventas CASCADE; 
             DROP TABLE IF EXISTS productos CASCADE;
-            DROP TABLE IF EXISTS profiles CASCADE;
 
-            -- Core tables
-            CREATE TABLE productos (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT,
-                category TEXT,
-                price NUMERIC DEFAULT 0,
-                stock NUMERIC DEFAULT 0,
-                ideal_stock NUMERIC DEFAULT 0,
-                unit TEXT DEFAULT 'Unidad',
-                is_service BOOLEAN DEFAULT FALSE,
-                sold_by_weight BOOLEAN DEFAULT FALSE,
-                sold_by_length BOOLEAN DEFAULT FALSE,
-                allow_manual_price BOOLEAN DEFAULT FALSE,
-                image TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE ventas (
-                id TEXT PRIMARY KEY,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                total_usd NUMERIC NOT NULL,
-                exchange_rate NUMERIC,
-                items INTEGER,
-                payment_methods JSONB,
-                seller_id UUID REFERENCES auth.users(id) ON DELETE SET NULL
-            );
-
-            CREATE TABLE venta_items (
-                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                venta_id TEXT REFERENCES ventas(id) ON DELETE CASCADE,
-                producto_id TEXT REFERENCES productos(id) ON DELETE SET NULL,
-                quantity NUMERIC NOT NULL,
-                price NUMERIC NOT NULL
-            );
-
-            -- Profiles table stores the role for each authenticated user.  New
-            -- users are given the "buyer" role by default and can be promoted
-            -- to "seller" or "admin" by an administrator.
-            CREATE TABLE profiles (
-                id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-                role TEXT NOT NULL DEFAULT 'buyer'
-            );
-
-            -- Automatically insert a profile row when a new auth user is created.
-            CREATE OR REPLACE FUNCTION public.create_profile_for_new_user()
-            RETURNS TRIGGER AS $$
-            BEGIN
-                -- Insert the new user's profile with default role 'buyer'.  Use the
-                -- fully‑qualified table name to avoid search_path issues.
-                INSERT INTO public.profiles(id, role) VALUES (NEW.id, 'buyer');
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-            CREATE TRIGGER on_auth_user_created
-            AFTER INSERT ON auth.users
-            FOR EACH ROW EXECUTE FUNCTION public.create_profile_for_new_user();
-
-            -- Helper function to test whether the supplied user id belongs to
-            -- an administrator.  Used in row‑level security policies to
-            -- restrict operations to admins.
-            CREATE OR REPLACE FUNCTION is_admin_user(user_id UUID)
-            RETURNS BOOLEAN
-            LANGUAGE plpgsql
-            SECURITY DEFINER
-            AS $$
-            DECLARE
-                is_admin BOOLEAN;
-            BEGIN
-                SELECT role = 'admin' INTO is_admin FROM profiles WHERE id = user_id;
-                RETURN COALESCE(is_admin, false);
-            END;
-            $$;
-
-            -- Helper function to decrement stock for non‑service products when
-            -- recording a sale.  This function is invoked from the client code
-            -- after a successful sale.
-            CREATE OR REPLACE FUNCTION decrement_stock(product_id TEXT, decrement_value NUMERIC)
-            RETURNS void AS $$
-            BEGIN
-                UPDATE productos
-                SET stock = stock - decrement_value
-                WHERE id = product_id AND is_service = FALSE;
-            END;
-            $$ LANGUAGE plpgsql;
-
-            -- Enable row level security (RLS) on all tables.  Without RLS
-            -- policies, no authenticated user can access table rows.
-            ALTER TABLE productos ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE ventas    ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE venta_items ENABLE ROW LEVEL SECURITY;
-            ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-
-            -- Products: everyone can read; only administrators can insert,
-            -- update or delete products.  Sellers and buyers may never
-            -- modify the catalogue.
-            CREATE POLICY "Productos public read" ON productos
-              FOR SELECT USING (true);
-            CREATE POLICY "Productos admin manage" ON productos
-              FOR ALL USING (is_admin_user(auth.uid()))
-              WITH CHECK (is_admin_user(auth.uid()));
-
-            -- Profiles: each user can view their own profile row.  Only
-            -- administrators can edit or view other users' profiles.
-            CREATE POLICY "Profiles: user can view own" ON profiles
-              FOR SELECT TO authenticated
-              USING (id = auth.uid());
-            CREATE POLICY "Profiles: admin manage" ON profiles
-              FOR ALL TO authenticated
-              USING (is_admin_user(auth.uid()))
-              WITH CHECK (is_admin_user(auth.uid()));
-
-            -- Allow the trigger function to insert a profile row when a new
-            -- user registers.  Without this explicit insert policy, row
-            -- level security would prevent the insert from happening.
-            CREATE POLICY "Profiles: allow insert" ON profiles
-              FOR INSERT
-              WITH CHECK (true);
-
-            -- Sales (ventas): sellers and administrators can insert and read
-            -- sales; only administrators can update or delete existing sales.
-            CREATE POLICY "Ventas: sellers insert" ON ventas
-              FOR INSERT TO authenticated
-              WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('seller','admin')));
-            CREATE POLICY "Ventas: sellers view" ON ventas
-              FOR SELECT TO authenticated
-              USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('seller','admin')));
-            CREATE POLICY "Ventas: admin manage" ON ventas
-              FOR ALL TO authenticated
-              USING (is_admin_user(auth.uid()))
-              WITH CHECK (is_admin_user(auth.uid()));
-
-            -- Sale items: sellers and administrators can insert, view and
-            -- update sale items; only administrators can delete them.
-            CREATE POLICY "Venta items: sellers insert" ON venta_items
-              FOR INSERT TO authenticated
-              WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('seller','admin')));
-            CREATE POLICY "Venta items: sellers view" ON venta_items
-              FOR SELECT TO authenticated
-              USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('seller','admin')));
-            CREATE POLICY "Venta items: sellers update" ON venta_items
-              FOR UPDATE TO authenticated
-              USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('seller','admin')))
-              WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('seller','admin')));
-            CREATE POLICY "Venta items: admin delete" ON venta_items
-              FOR DELETE TO authenticated
-              USING (is_admin_user(auth.uid()));
-
-            -- Include productos table in the realtime publication so that
-            -- product changes are broadcast to clients via websockets.
+            CREATE TABLE productos ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, category TEXT, price NUMERIC DEFAULT 0, stock NUMERIC DEFAULT 0, ideal_stock NUMERIC DEFAULT 0, unit TEXT DEFAULT 'Unidad', is_service BOOLEAN DEFAULT FALSE, sold_by_weight BOOLEAN DEFAULT FALSE, sold_by_length BOOLEAN DEFAULT FALSE, allow_manual_price BOOLEAN DEFAULT FALSE, image TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
+            CREATE TABLE ventas ( id TEXT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT NOW(), total_usd NUMERIC NOT NULL, exchange_rate NUMERIC, items INTEGER, payment_methods JSONB, seller_id UUID REFERENCES auth.users(id) ON DELETE SET NULL );
+            CREATE TABLE venta_items ( id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, venta_id TEXT REFERENCES ventas(id) ON DELETE CASCADE, producto_id TEXT REFERENCES productos(id) ON DELETE SET NULL, quantity NUMERIC NOT NULL, price NUMERIC NOT NULL );
+            CREATE OR REPLACE FUNCTION decrement_stock(product_id TEXT, decrement_value NUMERIC) RETURNS void AS $$ BEGIN UPDATE productos SET stock = stock - decrement_value WHERE id = product_id AND is_service = FALSE; END; $$ LANGUAGE plpgsql;
+            
+            ALTER TABLE productos ENABLE ROW LEVEL SECURITY; ALTER TABLE ventas ENABLE ROW LEVEL SECURITY; ALTER TABLE venta_items ENABLE ROW LEVEL SECURITY;
+            
+            CREATE POLICY "Allow public read" ON productos FOR SELECT USING (true); CREATE POLICY "Allow auth users to manage" ON productos FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+            CREATE POLICY "Allow auth users to manage sales" ON ventas FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated'); 
+            CREATE POLICY "Allow auth users to manage sale items" ON venta_items FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+            
             ALTER PUBLICATION supabase_realtime ADD TABLE productos;
         `;
         
@@ -559,91 +375,6 @@
         let deferredInstallPrompt = null;
         let isBcvAuto = true;
         let latestBcvRate = 0;
-
-        // Role of currently signed in user.  Possible values: 'admin', 'seller', 'buyer'.
-        let userRole = null;
-
-        /**
-         * Fetch the role of the current user from the `profiles` table.
-         * On error or if not authenticated, userRole will be null.
-         */
-        async function fetchUserRole() {
-            if (!session || !supabaseClient) {
-                userRole = null;
-                return;
-            }
-            try {
-                const { data, error } = await supabaseClient
-                    .from('profiles')
-                    .select('role')
-                    .eq('id', session.user.id)
-                    .single();
-                if (error) {
-                    console.error('Error fetching user role:', error);
-                    userRole = null;
-                } else {
-                    userRole = data?.role || null;
-                }
-            } catch (err) {
-                console.error('Error fetching user role:', err);
-                userRole = null;
-            }
-        }
-
-        /**
-         * Update UI controls that depend on the user's role.
-         * Admins can see and use management and analysis buttons.
-         */
-        function updateUIByRole() {
-            // Determine role flags.  Administrators inherit seller permissions.
-            const isAdmin  = userRole === 'admin';
-            const isSeller = userRole === 'seller' || isAdmin;
-            // Consider unauthenticated visitors as buyers so they can view the catalog
-            const isBuyer  = !session || userRole === 'buyer';
-
-            // Gestión del catálogo sólo para administradores
-            const manageBtn = document.getElementById('btn-manage-products');
-            if (manageBtn) {
-                manageBtn.classList.toggle('hidden', !isAdmin);
-                manageBtn.disabled = !session || !isAdmin;
-            }
-
-            // Botón para crear vendedores (sólo visible y habilitado para administradores)
-            const createSellerBtn = document.getElementById('btn-create-seller');
-            if (createSellerBtn) {
-                createSellerBtn.classList.toggle('hidden', !isAdmin);
-                createSellerBtn.disabled = !session || !isAdmin;
-            }
-
-            // Botón para gestionar vendedores (listar/editar/eliminar) solo para administradores
-            const manageSellersBtn = document.getElementById('btn-manage-sellers');
-            if (manageSellersBtn) {
-                manageSellersBtn.classList.toggle('hidden', !isAdmin);
-                manageSellersBtn.disabled = !session || !isAdmin;
-            }
-
-            // Análisis de ventas sólo para administradores
-            const analyzeBtn = document.getElementById('btn-analyze-sales');
-            if (analyzeBtn) {
-                analyzeBtn.classList.toggle('hidden', !isAdmin);
-                analyzeBtn.disabled = !session || !isAdmin;
-            }
-
-            // Opciones de venta (finalizar venta y WhatsApp) accesibles para vendedores y administradores.
-            ['btn-finalize', 'btn-wa'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) {
-                    el.classList.toggle('hidden', !isSeller || !session);
-                    el.disabled = !session || !isSeller;
-                }
-            });
-            // El resumen del día sólo lo ve el administrador
-            const summaryBtn = document.getElementById('btn-summary');
-            if (summaryBtn) {
-                summaryBtn.classList.toggle('hidden', !isAdmin || !session);
-                summaryBtn.disabled = !session || !isAdmin;
-            }
-        }
 
         Object.defineProperty(window, 'exchangeRate', { get: () => parseFloat(document.getElementById('exchange_rate').value) || 0 });
 
@@ -1020,11 +751,7 @@
                 container.innerHTML = `<p class="text-text-secondary text-center p-4">No hay productos.</p>`;
                 return;
             }
-            // Filtra por el texto de búsqueda en el gestor
-            const searchEl = document.getElementById('product-manage-search');
-            const query = searchEl ? searchEl.value.trim().toLowerCase() : '';
-            const filtered = allProducts.filter(p => p.name.toLowerCase().includes(query));
-            filtered.sort((a,b) => a.name.localeCompare(b.name)).forEach(p => {
+            allProducts.sort((a,b) => a.name.localeCompare(b.name)).forEach(p => {
                 const item = document.createElement('div');
                 item.className = 'flex justify-between items-center p-2 border-b border-border-color last:border-b-0 hover:bg-accent';
                 item.innerHTML = `<div><p class="font-semibold">${p.name}</p><p class="text-sm text-text-secondary">${formatCurrency(p.price)} - Stock: ${p.stock}</p></div><button data-id="${p.id}" class="edit-product-btn btn btn-secondary text-sm">Editar</button>`;
@@ -1424,7 +1151,97 @@
                                 </tr>
                             </tbody>
                         </table>
-                    </body>
+                    
+<script>
+(function(){
+  const baseFn = "/.netlify/functions";
+  const fnCreate = baseFn + "/create-seller";
+  const fnManage = baseFn + "/manage-seller";
+
+  function qs(sel, root=document){ return root.querySelector(sel); }
+  function qsa(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+  function show(el){ el.classList.remove('hidden'); }
+  function hide(el){ el.classList.add('hidden'); }
+
+  // Dropdown
+  const btnVend = qs('#btn-vendedores');
+  const menuVend = qs('#menu-vendedores');
+  if(btnVend && menuVend){
+    btnVend.addEventListener('click', (e)=>{ e.stopPropagation(); menuVend.classList.toggle('hidden'); });
+    document.addEventListener('click', (e)=>{ if(!menuVend.contains(e.target) && e.target!==btnVend){ menuVend.classList.add('hidden'); }});
+  }
+
+  // Open modals
+  const openCrear = ()=>{ hide(qs('#cv-msg')); qs('#cv-email').value=''; qs('#cv-pass').value=''; show(qs('#modal-crear-vendedor')); };
+  const openGestion = ()=>{ show(qs('#modal-gestion-vendedores')); cargarVendedores(); };
+
+  const actCrear = qs('#act-crear-vendedor'); if(actCrear) actCrear.addEventListener('click', openCrear);
+  const actGest = qs('#act-gestionar-vendedores'); if(actGest) actGest.addEventListener('click', openGestion);
+
+  // Close modal buttons
+  qsa('[data-close]').forEach(b=> b.addEventListener('click', ()=> hide(qs(b.getAttribute('data-close')))));
+
+  // Crear vendedor
+  const cvCrear = qs('#cv-crear');
+  if(cvCrear){
+    cvCrear.addEventListener('click', async ()=>{
+      const email = qs('#cv-email').value.trim();
+      const password = qs('#cv-pass').value;
+      const msg = qs('#cv-msg'); msg.classList.remove('text-green-400','text-red-400'); msg.classList.add('text-gray-200'); show(msg); msg.textContent='Creando…';
+      try{
+        const r = await fetch(fnCreate, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) });
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok || !j.ok) throw new Error((j && j.error) || 'Error creando vendedor');
+        msg.textContent = 'Vendedor creado ✓'; msg.classList.remove('text-gray-200'); msg.classList.add('text-green-400');
+        cargarVendedores();
+      }catch(e){ msg.textContent = 'Error: ' + e.message; msg.classList.remove('text-gray-200'); msg.classList.add('text-red-400'); }
+    });
+  }
+
+  // Gestionar: listar
+  async function cargarVendedores(){
+    const q = (qs('#gv-q').value||'').trim();
+    const url = q ? fnManage + '?q=' + encodeURIComponent(q) : fnManage;
+    const body = qs('#gv-body');
+    if(!body) return;
+    body.innerHTML = '<tr><td colspan="2" class="px-2 py-2">Cargando…</td></tr>';
+    try{
+      const r = await fetch(url, { method:'GET' });
+      const j = await r.json();
+      if(!r.ok || !j.ok) throw new Error(j && j.error || 'Error listando');
+      if(!j.sellers.length){ body.innerHTML = '<tr><td colspan="2" class="px-2 py-2">Sin resultados</td></tr>'; return; }
+      body.innerHTML = '';
+      j.sellers.forEach(s=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td class="px-2 py-2 bg-gray-800 rounded-l-lg">'+s.email+'</td>' +
+                       '<td class="px-2 py-2 text-right bg-gray-800 rounded-r-lg">' +
+                       '<button class="btn btn-secondary mr-2" data-reset="'+s.id+'" data-email="'+s.email+'">Reset pass</button>' +
+                       '<button class="btn btn-danger" data-del="'+s.id+'" data-email="'+s.email+'">Eliminar</button>' +
+                       '</td>';
+        body.appendChild(tr);
+      });
+
+      // listeners
+      qsa('[data-reset]').forEach(b=> b.addEventListener('click', async ()=>{
+        const id = b.getAttribute('data-reset'); const email=b.getAttribute('data-email');
+        const pwd = prompt('Nueva contraseña para '+email+': (mín. 6)');
+        if(!pwd || pwd.length<6) return;
+        const r = await fetch(fnManage, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId:id, password:pwd }) });
+        if(r.ok){ alert('Contraseña actualizada'); } else { alert('Error al actualizar'); }
+      }));
+      qsa('[data-del]').forEach(b=> b.addEventListener('click', async ()=>{
+        const id = b.getAttribute('data-del'); const email=b.getAttribute('data-email');
+        if(!confirm('Eliminar vendedor '+email+'?')) return;
+        const r = await fetch(fnManage, { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId:id }) });
+        if(r.ok){ cargarVendedores(); } else { alert('Error al eliminar'); }
+      }));
+    }catch(e){ qs('#gv-body').innerHTML = '<tr><td colspan="2" class="px-2 py-2 text-red-400">Error: '+e.message+'</td></tr>'; }
+  }
+  const qInp = qs('#gv-q'); if(qInp) qInp.addEventListener('input', cargarVendedores);
+})();
+</script>
+
+</body>
                     </html>
                 `;
 
@@ -1515,31 +1332,23 @@
             const { data: { session: initialSession } } = await supabaseClient.auth.getSession();
             session = initialSession;
             lockUIBySession();
-            // Get the current user's role and update UI accordingly
-            await fetchUserRole();
-            updateUIByRole();
             await syncProductsFromSupabase();
             listenToProductChanges();
 
             supabaseClient.auth.onAuthStateChange((_event, newSession) => { 
                 const sessionChanged = session?.user?.id !== newSession?.user?.id;
                 session = newSession; 
-                lockUIBySession();
-                // Refresh user role and update UI whenever the auth session changes
-                if (session) {
-                    fetchUserRole().then(updateUIByRole);
-                } else {
-                    userRole = null;
-                    updateUIByRole();
-                }
+                lockUIBySession(); 
                 if (sessionChanged && newSession) {
-                    // If a different user just signed in, resync products and subscribe to changes
                     syncProductsFromSupabase();
                     listenToProductChanges();
-                } else if (!newSession && sessionChanged) {
-                    // If the user just signed out, resync products for public catalog and keep listening
-                    syncProductsFromSupabase();
-                    listenToProductChanges();
+                } else if (!newSession) {
+                    allProducts = [];
+                    renderProducts();
+                    renderCategoryFilters();
+                    if (window.productChangesSubscription) {
+                        window.productChangesSubscription.unsubscribe();
+                    }
                 }
             });
 
@@ -1629,254 +1438,6 @@
 
             document.getElementById('add-new-product-btn').addEventListener('click', () => openProductForm());
             document.getElementById('upload-json-btn').addEventListener('click', () => document.getElementById('json-upload-input').click());
-
-            // Maneja la carga de un archivo JSON que contiene productos. Este flujo
-            // reemplaza por completo los productos existentes: al seleccionar un
-            // archivo, se lee su contenido, se valida que sea un arreglo de
-            // objetos y se solicita confirmación al usuario. Si confirma, se
-            // eliminan todos los registros de la tabla "productos" y se insertan
-            // los nuevos elementos. Los IDs se generan si están ausentes para
-            // evitar duplicados. Finalmente, la lista local y el filtro de
-            // categorías se actualizan para reflejar el nuevo catálogo.
-            const jsonUploadInput = document.getElementById('json-upload-input');
-            if (jsonUploadInput) {
-                jsonUploadInput.addEventListener('change', async (event) => {
-                    const file = event.target.files[0];
-                    if (!file) return;
-                    try {
-                        const text = await file.text();
-                        const imported = JSON.parse(text);
-                        if (!Array.isArray(imported)) {
-                            showToast('El JSON debe contener un arreglo de productos');
-                            event.target.value = '';
-                            return;
-                        }
-                        // Solicita confirmación al usuario antes de eliminar e importar
-                        if (!confirm('Esto reemplazará todos los productos existentes. ¿Desea continuar?')) {
-                            event.target.value = '';
-                            return;
-                        }
-                        // Elimina todos los productos actuales (sólo administradores tienen permiso)
-                        const deleteRes = await supabaseClient.from('productos').delete().neq('id', '');
-                        if (deleteRes.error) {
-                            console.error(deleteRes.error);
-                            showToast('Error eliminando productos existentes');
-                            event.target.value = '';
-                            return;
-                        }
-                        // Construye lista sanitizada de productos; genera ID si falta y asigna valores por defecto
-                        const now = Date.now();
-                        const sanitized = imported.map((prod, idx) => {
-                            // Copiar sólo campos conocidos
-                            const name = prod.name || '';
-                            let id = prod.id;
-                            if (!id || typeof id !== 'string') {
-                                id = `prod_${slugify(name)}_${now}_${idx}`;
-                            }
-                            return {
-                                id,
-                                name,
-                                description: prod.description || '',
-                                category: prod.category || '',
-                                price: typeof prod.price === 'number' ? prod.price : 0,
-                                stock: typeof prod.stock === 'number' ? prod.stock : 0,
-                                ideal_stock: typeof prod.ideal_stock === 'number' ? prod.ideal_stock : 0,
-                                unit: prod.unit || 'Unidad',
-                                is_service: !!prod.is_service,
-                                sold_by_weight: !!prod.sold_by_weight,
-                                sold_by_length: !!prod.sold_by_length,
-                                allow_manual_price: !!prod.allow_manual_price,
-                                image: prod.image || '',
-                                created_at: prod.created_at || new Date().toISOString()
-                            };
-                        });
-                        // Inserta productos con upsert para evitar conflictos
-                        const insertRes = await supabaseClient.from('productos').upsert(sanitized);
-                        if (insertRes.error) {
-                            console.error(insertRes.error);
-                            showToast('Error importando productos');
-                            event.target.value = '';
-                            return;
-                        }
-                        // Actualiza local
-                        allProducts = sanitized;
-                        localStorage.setItem('products', JSON.stringify(allProducts));
-                        renderProducts();
-                        renderCategoryFilters();
-                        showToast('Productos importados correctamente');
-                        // Limpia el input para permitir cargar nuevamente el mismo archivo si se desea
-                        event.target.value = '';
-                    } catch (err) {
-                        console.error(err);
-                        showToast('Error procesando el archivo JSON');
-                        event.target.value = '';
-                    }
-                });
-            }
-
-            // Botón que abre el formulario para crear vendedores (sólo visible para administradores)
-            const createSellerBtn = document.getElementById('btn-create-seller');
-            if (createSellerBtn) {
-                createSellerBtn.addEventListener('click', () => {
-                    openModal('create-seller-modal');
-                });
-            }
-
-            // Enviar el formulario de creación de vendedor. Envía una petición a la función serverless
-            // /.netlify/functions/create-seller con email y contraseña. Muestra mensajes según el resultado.
-            const createSellerForm = document.getElementById('create-seller-form');
-            if (createSellerForm) {
-                createSellerForm.addEventListener('submit', async e => {
-                    e.preventDefault();
-                    const email    = document.getElementById('seller-email').value;
-                    const password = document.getElementById('seller-password').value;
-                    if (!email || !password) {
-                        showToast('Email y contraseña son obligatorios');
-                        return;
-                    }
-                    try {
-                        const response = await fetch('/.netlify/functions/create-seller', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ email, password })
-                        });
-                        // Intenta leer la respuesta como texto primero. Algunas respuestas de error de Netlify
-                        // pueden no devolver JSON válido.
-                        const text = await response.text();
-                        let result;
-                        try {
-                            result = JSON.parse(text);
-                        } catch (parseErr) {
-                            result = { message: text };
-                        }
-                        if (response.ok) {
-                            showToast(result.message || 'Vendedor creado correctamente');
-                            closeModal();
-                        } else {
-                            showToast(result.message || 'Error al crear vendedor');
-                        }
-                    } catch (err) {
-                        showToast(err.message || 'Error de red');
-                    }
-                });
-            }
-
-            // Vincula el buscador de gestión de productos para filtrar a medida que se escribe
-            const productManageSearch = document.getElementById('product-manage-search');
-            if (productManageSearch) {
-                productManageSearch.addEventListener('input', () => {
-                    renderProductManagementList();
-                });
-            }
-
-            // ----------------------------------------------------------------------
-            // Gestión de vendedores
-            // Lista global de vendedores. Se cargará cuando se abra el modal de gestión.
-            let sellerList = [];
-            async function loadSellerList() {
-                try {
-                    const response = await fetch('/.netlify/functions/manage-seller');
-                    const text = await response.text();
-                    let sellers;
-                    try { sellers = JSON.parse(text); } catch { sellers = []; }
-                    if (response.ok) {
-                        sellerList = Array.isArray(sellers) ? sellers : [];
-                        renderSellerList();
-                    } else {
-                        showToast((sellers && sellers.message) || 'Error al obtener vendedores');
-                    }
-                } catch (err) {
-                    showToast(err.message || 'Error al obtener vendedores');
-                }
-            }
-            function renderSellerList() {
-                const container = document.getElementById('seller-list-container');
-                if (!container) return;
-                container.innerHTML = '';
-                const searchInput = document.getElementById('seller-search');
-                const query = searchInput && searchInput.value ? searchInput.value.trim().toLowerCase() : '';
-                const filtered = sellerList.filter(s => s.email && s.email.toLowerCase().includes(query));
-                if (filtered.length === 0) {
-                    container.innerHTML = '<p class="text-center text-text-secondary p-4">No hay vendedores.</p>';
-                    return;
-                }
-                filtered.forEach(seller => {
-                    const row = document.createElement('div');
-                    row.className = 'flex justify-between items-center border-b border-border-color p-2 last:border-b-0';
-                    row.innerHTML = `
-                        <div><p class="font-medium">${seller.email}</p></div>
-                        <div class="flex gap-2">
-                            <button class="edit-seller-btn btn btn-secondary text-xs py-1 px-2" data-id="${seller.id}" data-email="${seller.email}">Editar</button>
-                            <button class="delete-seller-btn btn btn-danger text-xs py-1 px-2" data-id="${seller.id}" data-email="${seller.email}">Eliminar</button>
-                        </div>`;
-                    container.appendChild(row);
-                });
-                container.querySelectorAll('.edit-seller-btn').forEach(btn => {
-                    btn.addEventListener('click', handleEditSeller);
-                });
-                container.querySelectorAll('.delete-seller-btn').forEach(btn => {
-                    btn.addEventListener('click', handleDeleteSeller);
-                });
-            }
-            async function handleEditSeller(e) {
-                const id = e.currentTarget.dataset.id;
-                const email = e.currentTarget.dataset.email;
-                const newPass = prompt(`Cambiar contraseña para ${email}:\nIntroduce la nueva contraseña`);
-                if (!newPass) return;
-                try {
-                    const response = await fetch('/.netlify/functions/manage-seller', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id, password: newPass })
-                    });
-                    const text = await response.text();
-                    let data;
-                    try { data = JSON.parse(text); } catch { data = { message: text }; }
-                    if (response.ok) {
-                        showToast(data.message || 'Contraseña actualizada');
-                    } else {
-                        showToast(data.message || 'Error actualizando contraseña');
-                    }
-                } catch (err) {
-                    showToast(err.message || 'Error de red');
-                }
-            }
-            async function handleDeleteSeller(e) {
-                const id = e.currentTarget.dataset.id;
-                const email = e.currentTarget.dataset.email;
-                if (!await showConfirmation(`¿Seguro que quieres eliminar al vendedor ${email}? Esta acción es irreversible.`)) return;
-                try {
-                    const response = await fetch(`/.netlify/functions/manage-seller?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-                    const text = await response.text();
-                    let data;
-                    try { data = JSON.parse(text); } catch { data = { message: text }; }
-                    if (response.ok) {
-                        showToast(data.message || 'Vendedor eliminado');
-                        // Remove from local list and re-render
-                        sellerList = sellerList.filter(s => s.id !== id);
-                        renderSellerList();
-                    } else {
-                        showToast(data.message || 'Error eliminando vendedor');
-                    }
-                } catch (err) {
-                    showToast(err.message || 'Error de red');
-                }
-            }
-            // Evento para abrir el modal de gestión de vendedores y cargar la lista
-            const manageSellersBtn = document.getElementById('btn-manage-sellers');
-            if (manageSellersBtn) {
-                manageSellersBtn.addEventListener('click', () => {
-                    openModal('seller-management-modal');
-                    loadSellerList();
-                });
-            }
-            // Filtra vendedores a medida que se escribe
-            const sellerSearchInput = document.getElementById('seller-search');
-            if (sellerSearchInput) {
-                sellerSearchInput.addEventListener('input', () => {
-                    renderSellerList();
-                });
-            }
             
             function exportProductsAsJson() {
                 if (!allProducts || allProducts.length === 0) {
@@ -2001,5 +1562,129 @@
             initializeApp();
         });
     </script>
+
+<!-- Modales Vendedores -->
+<div id="modal-crear-vendedor" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/50"></div>
+  <div class="relative bg-gray-900 text-white w-full max-w-md mx-4 rounded-2xl p-5 shadow-xl">
+    <h3 class="text-lg font-semibold mb-3">Crear vendedor</h3>
+    <div class="space-y-3">
+      <input id="cv-email" type="email" placeholder="Email" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none">
+      <input id="cv-pass" type="password" placeholder="Contraseña (mín. 6)" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none">
+    </div>
+    <div class="flex gap-2 justify-end mt-4">
+      <button id="cv-crear" class="btn btn-primary">Crear</button>
+      <button data-close="#modal-crear-vendedor" class="btn btn-secondary">Cancelar</button>
+    </div>
+    <div id="cv-msg" class="text-sm mt-2"></div>
+  </div>
+</div>
+
+<div id="modal-gestion-vendedores" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/50"></div>
+  <div class="relative bg-gray-900 text-white w-full max-w-3xl mx-4 rounded-2xl p-5 shadow-xl max-h-[90vh] overflow-auto">
+    <div class="flex items-center justify-between gap-3">
+      <h3 class="text-lg font-semibold">Vendedores</h3>
+      <input id="gv-q" placeholder="Buscar email…" class="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none">
+    </div>
+    <table class="w-full mt-3 border-separate border-spacing-y-1">
+      <thead><tr><th class="text-left px-2">Email</th><th class="px-2">Acciones</th></tr></thead>
+      <tbody id="gv-body"></tbody>
+    </table>
+    <div class="text-right mt-3">
+      <button data-close="#modal-gestion-vendedores" class="btn btn-secondary">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const baseFn = "/.netlify/functions";
+  const fnCreate = baseFn + "/create-seller";
+  const fnManage = baseFn + "/manage-seller";
+
+  function qs(sel, root=document){ return root.querySelector(sel); }
+  function qsa(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+  function show(el){ el.classList.remove('hidden'); }
+  function hide(el){ el.classList.add('hidden'); }
+
+  // Dropdown
+  const btnVend = qs('#btn-vendedores');
+  const menuVend = qs('#menu-vendedores');
+  if(btnVend && menuVend){
+    btnVend.addEventListener('click', (e)=>{ e.stopPropagation(); menuVend.classList.toggle('hidden'); });
+    document.addEventListener('click', (e)=>{ if(!menuVend.contains(e.target) && e.target!==btnVend){ menuVend.classList.add('hidden'); }});
+  }
+
+  // Open modals
+  const openCrear = ()=>{ hide(qs('#cv-msg')); qs('#cv-email').value=''; qs('#cv-pass').value=''; show(qs('#modal-crear-vendedor')); };
+  const openGestion = ()=>{ show(qs('#modal-gestion-vendedores')); cargarVendedores(); };
+
+  const actCrear = qs('#act-crear-vendedor'); if(actCrear) actCrear.addEventListener('click', openCrear);
+  const actGest = qs('#act-gestionar-vendedores'); if(actGest) actGest.addEventListener('click', openGestion);
+
+  // Close modal buttons
+  qsa('[data-close]').forEach(b=> b.addEventListener('click', ()=> hide(qs(b.getAttribute('data-close')))));
+
+  // Crear vendedor
+  const cvCrear = qs('#cv-crear');
+  if(cvCrear){
+    cvCrear.addEventListener('click', async ()=>{
+      const email = qs('#cv-email').value.trim();
+      const password = qs('#cv-pass').value;
+      const msg = qs('#cv-msg'); msg.classList.remove('text-green-400','text-red-400'); msg.classList.add('text-gray-200'); show(msg); msg.textContent='Creando…';
+      try{
+        const r = await fetch(fnCreate, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) });
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok || !j.ok) throw new Error((j && j.error) || 'Error creando vendedor');
+        msg.textContent = 'Vendedor creado ✓'; msg.classList.remove('text-gray-200'); msg.classList.add('text-green-400');
+        cargarVendedores();
+      }catch(e){ msg.textContent = 'Error: ' + e.message; msg.classList.remove('text-gray-200'); msg.classList.add('text-red-400'); }
+    });
+  }
+
+  // Gestionar: listar
+  async function cargarVendedores(){
+    const q = (qs('#gv-q').value||'').trim();
+    const url = q ? fnManage + '?q=' + encodeURIComponent(q) : fnManage;
+    const body = qs('#gv-body');
+    if(!body) return;
+    body.innerHTML = '<tr><td colspan="2" class="px-2 py-2">Cargando…</td></tr>';
+    try{
+      const r = await fetch(url, { method:'GET' });
+      const j = await r.json();
+      if(!r.ok || !j.ok) throw new Error(j && j.error || 'Error listando');
+      if(!j.sellers.length){ body.innerHTML = '<tr><td colspan="2" class="px-2 py-2">Sin resultados</td></tr>'; return; }
+      body.innerHTML = '';
+      j.sellers.forEach(s=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td class="px-2 py-2 bg-gray-800 rounded-l-lg">'+s.email+'</td>' +
+                       '<td class="px-2 py-2 text-right bg-gray-800 rounded-r-lg">' +
+                       '<button class="btn btn-secondary mr-2" data-reset="'+s.id+'" data-email="'+s.email+'">Reset pass</button>' +
+                       '<button class="btn btn-danger" data-del="'+s.id+'" data-email="'+s.email+'">Eliminar</button>' +
+                       '</td>';
+        body.appendChild(tr);
+      });
+
+      // listeners
+      qsa('[data-reset]').forEach(b=> b.addEventListener('click', async ()=>{
+        const id = b.getAttribute('data-reset'); const email=b.getAttribute('data-email');
+        const pwd = prompt('Nueva contraseña para '+email+': (mín. 6)');
+        if(!pwd || pwd.length<6) return;
+        const r = await fetch(fnManage, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId:id, password:pwd }) });
+        if(r.ok){ alert('Contraseña actualizada'); } else { alert('Error al actualizar'); }
+      }));
+      qsa('[data-del]').forEach(b=> b.addEventListener('click', async ()=>{
+        const id = b.getAttribute('data-del'); const email=b.getAttribute('data-email');
+        if(!confirm('Eliminar vendedor '+email+'?')) return;
+        const r = await fetch(fnManage, { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId:id }) });
+        if(r.ok){ cargarVendedores(); } else { alert('Error al eliminar'); }
+      }));
+    }catch(e){ qs('#gv-body').innerHTML = '<tr><td colspan="2" class="px-2 py-2 text-red-400">Error: '+e.message+'</td></tr>'; }
+  }
+  const qInp = qs('#gv-q'); if(qInp) qInp.addEventListener('input', cargarVendedores);
+})();
+</script>
+
 </body>
 </html>
