@@ -58,8 +58,11 @@ exports.handler = async (event) => {
     }
     return { statusCode: 200, body: JSON.stringify(result) };
   }
-  if (event.httpMethod === 'PUT') {
-    // Actualizar contraseña: requiere JSON con { id, password }
+  if (event.httpMethod === 'PUT' || event.httpMethod === 'PATCH') {
+    // Actualizar contraseña: requiere JSON con { id, password }.
+    // Supabase Admin API utiliza el método PATCH en el endpoint /auth/v1/admin/users/{id}
+    // para actualizar atributos como la contraseña.  Algunas versiones de la API
+    // también aceptan PUT, pero PATCH es el método recomendado.
     let body;
     try { body = JSON.parse(event.body); } catch { body = {}; }
     const { id, password } = body;

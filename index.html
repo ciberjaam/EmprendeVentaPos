@@ -600,6 +600,17 @@
                     userRole = null;
                 } else {
                     userRole = data?.role || null;
+                    // Persist the user's role and id for offline use
+                    if (userRole) {
+                        try {
+                            localStorage.setItem('userRole', userRole);
+                            if (session && session.user && session.user.id) {
+                                localStorage.setItem('userId', session.user.id);
+                            }
+                        } catch(err) {
+                            console.warn('Could not persist user role', err);
+                        }
+                    }
                 }
             } catch (err) {
                 console.error('Error fetching user role:', err);
@@ -1313,15 +1324,25 @@
 
         async function safeRecordSale(paymentMethods) {
             try {
-                if(!session) throw new Error("Debes iniciar sesión para esta acción");
+                // Ensure we have a session or restore it from local storage for offline sales
+                if (!session) {
+                    const storedId = localStorage.getItem('userId');
+                    if (storedId) {
+                        session = { user: { id: storedId } };
+                    } else {
+                        throw new Error('Debes iniciar sesión para esta acción');
+                    }
+                }
                 await recordSale(paymentMethods);
                 return true;
             } catch(e) {
                 console.warn('Online sale recording failed, enqueuing offline.', e);
                 try {
+                    const sellerId = session && session.user ? session.user.id : localStorage.getItem('userId');
+                    if (!sellerId) throw new Error('Sin identificador de usuario para venta offline');
                     const ventaId = 'v_off_' + Date.now();
                     const totalUSD = window.cart.reduce((s,it)=> s + (it.price*it.quantity), 0);
-                    const venta = { id: ventaId, total_usd: totalUSD, exchange_rate: window.exchangeRate, items: window.cart.length, payment_methods: paymentMethods, seller_id: session.user.id };
+                    const venta = { id: ventaId, total_usd: totalUSD, exchange_rate: window.exchangeRate, items: window.cart.length, payment_methods: paymentMethods, seller_id: sellerId };
                     const items = window.cart.map(it=>({ venta_id: ventaId, producto_id: it.id, quantity: it.quantity, price: it.price }));
                     const stockUpdates = window.cart.filter(it=>!it.is_service).map(it=>({ id: it.id, quantityToDecrement: it.quantity }));
                     __offlineQueue.enqueue({ type:'venta', venta, items, stockUpdates });
@@ -1341,7 +1362,9 @@
                     showToast('Venta guardada offline. Se sincronizará automáticamente.');
                     return true;
                 } catch(e2) {
-                    console.error('Failed to enqueue offline sale:', e2); showToast('No se pudo registrar la venta ni guardarla offline.', 5000); return false;
+                    console.error('Failed to enqueue offline sale:', e2);
+                    showToast('No se pudo registrar la venta ni guardarla offline.', 5000);
+                    return false;
                 }
             }
         }
@@ -1456,6 +1479,120 @@
             }
         }
         
+        // Nueva versión de exportSalesSummary con rango de fechas (1, 7, 15 o 30 días) y filtro por método de pago.  Esta función utiliza prompts para solicitar parámetros al administrador.
+        async function exportSalesSummaryCustom() {
+            if (!session) { showToast('Debes iniciar sesión para ver el resumen.'); return; }
+            const daysInput = prompt('Mostrar ventas de los últimos días (elige 1, 7, 15 o 30):', '1');
+            if (daysInput === null) return;
+            let days = parseInt(daysInput, 10);
+            if (isNaN(days) || ![1, 7, 15, 30].includes(days)) {
+                days = 1;
+            }
+            let paymentFilter = prompt('Filtrar por tipo de pago (opcional). Usa valores como "efectivo_usd", "efectivo_bs", "zelle", "tarjeta", "pago_movil". Deja vacío para incluir todos:', '');
+            if (paymentFilter === null) return;
+            paymentFilter = (paymentFilter || '').trim().toLowerCase();
+            const startDate = new Date();
+            startDate.setHours(0, 0, 0, 0);
+            startDate.setDate(startDate.getDate() - (days - 1));
+            try {
+                const { data: sales, error } = await supabaseClient
+                    .from('ventas')
+                    .select('*, venta_items(*, productos(name))')
+                    .gte('created_at', startDate.toISOString())
+                    .order('created_at', { ascending: false });
+                if (error) throw error;
+                if (!sales || sales.length === 0) {
+                    showToast('No hay ventas registradas en el periodo seleccionado.');
+                    return;
+                }
+                let filteredSales = sales;
+                if (paymentFilter) {
+                    filteredSales = sales.filter(sale => {
+                        try {
+                            const methods = sale.payment_methods || {};
+                            return Object.keys(methods).some(key => key.toLowerCase() === paymentFilter);
+                        } catch {
+                            return false;
+                        }
+                    });
+                    if (filteredSales.length === 0) {
+                        showToast('No hay ventas para el tipo de pago seleccionado.');
+                        return;
+                    }
+                }
+                let totalUSD = 0;
+                let reportHtml = '';
+                filteredSales.forEach(sale => {
+                    totalUSD += sale.total_usd;
+                    (sale.venta_items || []).forEach(item => {
+                        const productName = item.productos ? item.productos.name : 'Producto Eliminado';
+                        const subTotalUSD = item.quantity * item.price;
+                        reportHtml += `
+                            <tr>
+                                <td>${new Date(sale.created_at).toLocaleString('es-VE')}</td>
+                                <td>${productName}</td>
+                                <td class="text-right">${item.quantity}</td>
+                                <td class="text-right">${formatCurrency(item.price)}</td>
+                                <td class="text-right">${formatCurrency(subTotalUSD)}</td>
+                            </tr>
+                        `;
+                    });
+                });
+                const endDate = new Date();
+                const rangeLabel = `${startDate.toLocaleDateString('es-VE')} – ${endDate.toLocaleDateString('es-VE')}`;
+                const fullHtml = `
+                    <html>
+                    <head>
+                        <title>Resumen de Ventas - ${rangeLabel}</title>
+                        <style>
+                            body { font-family: sans-serif; margin: 20px; }
+                            table { width: 100%; border-collapse: collapse; }
+                            th, td { border: 1px solid #ddd; padding: 8px; }
+                            th { background-color: #f2f2f2; text-align: left; }
+                            .text-right { text-align: right; }
+                            h1, h2 { text-align: center; }
+                            .total-row { font-weight: bold; background-color: #f9f9f9; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>Resumen de Ventas</h1>
+                        <h2>${rangeLabel}</h2>
+                        ${paymentFilter ? `<p><strong>Tipo de pago:</strong> ${paymentFilter}</p>` : ''}
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Fecha y Hora</th>
+                                    <th>Producto</th>
+                                    <th class="text-right">Cantidad</th>
+                                    <th class="text-right">Precio Unit.</th>
+                                    <th class="text-right">Subtotal</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${reportHtml}
+                                <tr class="total-row">
+                                    <td colspan="4">TOTAL PERIODO</td>
+                                    <td class="text-right">${formatCurrency(totalUSD)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </body>
+                    </html>
+                `;
+                const win = window.open('', '_blank');
+                if (!win) {
+                    showToast('No se pudo abrir la ventana para el resumen.');
+                    return;
+                }
+                win.document.write(fullHtml);
+                win.document.close();
+                win.print();
+            } catch (error) {
+                console.error('Error creando resumen de ventas:', error);
+                showToast('Error al generar el resumen: ' + (error.message || ''), 5000);
+            }
+        }
+
         async function syncProductsFromSupabase() {
             if (!navigator.onLine) {
                 console.log("Offline mode: Skipping Supabase sync.");
@@ -1531,9 +1668,27 @@
 
             const { data: { session: initialSession } } = await supabaseClient.auth.getSession();
             session = initialSession;
+            // If there is no active session (offline or not logged in), attempt
+            // to restore the previous user id and role from localStorage so
+            // the app remains functional offline.  This allows recording
+            // offline sales even after a refresh without re‑authenticating.
+            if (!session) {
+                const storedId = localStorage.getItem('userId');
+                const storedRole = localStorage.getItem('userRole');
+                if (storedId) {
+                    session = { user: { id: storedId } };
+                    userRole = storedRole || null;
+                }
+            }
             lockUIBySession();
-            // Get the current user's role and update UI accordingly
-            await fetchUserRole();
+            // Fetch the role from Supabase only if we have a session and
+            // online connectivity.  Otherwise fallback to stored role.
+            if (session && navigator.onLine) {
+                await fetchUserRole();
+            }
+            if (!userRole) {
+                try { userRole = localStorage.getItem('userRole') || null; } catch {}
+            }
             updateUIByRole();
             await syncProductsFromSupabase();
             listenToProductChanges();
@@ -2000,7 +2155,7 @@
                 }
                 closeCartDrawer();
             });
-            document.getElementById('btn-summary').addEventListener('click', () => { exportSalesSummary(); closeCartDrawer(); });
+            document.getElementById('btn-summary').addEventListener('click', () => { exportSalesSummaryCustom(); closeCartDrawer(); });
             document.getElementById('btn-analyze-sales').addEventListener('click', () => { analyzeDailySales(); closeCartDrawer(); });
 
             document.getElementById('generate-description-btn').addEventListener('click', async () => {
