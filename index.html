@@ -99,6 +99,22 @@
             background-color: var(--bg-secondary);
         }
         
+        /* Modal dialog styles */
+        /*
+         * Provide a dedicated class for all modal dialog boxes (confirmation
+         * prompts, WhatsApp choices, etc.) so that their contents remain
+         * legible regardless of the underlying overlay opacity.  The
+         * container uses a dark background with light text and a subtle
+         * border, ensuring contrast in both light and dark modes.  A
+         * consistent shadow helps the dialog stand out from the overlay.
+         */
+        .modal-dialog {
+            background-color: #1f2937; /* dark gray background */
+            color: #f9fafb;           /* near‑white text for high contrast */
+            border: 1px solid #4b5563; /* subtle border to delineate edges */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
         /* New Filter Bar Styles */
         #category-filters {
             background-color: #374151; /* gray-700 */
@@ -791,7 +807,11 @@
              return new Promise(resolve => {
                  const wrap = document.createElement('div');
                  wrap.className = 'modal-overlay-bg fixed inset-0 flex items-center justify-center z-50';
-                 wrap.innerHTML = `<div class="bg-secondary p-6 rounded-lg shadow-xl w-full max-w-sm text-center">
+                 // Build the confirmation dialog using the modal-dialog class for
+                 // improved readability.  The dark background and light text
+                 // specified in .modal-dialog ensure the message remains legible
+                 // even when the overlay is very opaque.
+                 wrap.innerHTML = `<div class="modal-dialog p-6 rounded-lg w-full max-w-sm text-center">
                      <h3 class="text-xl font-bold mb-3">Confirmación</h3>
                      <p class="mb-6">${message}</p>
                      <div class="flex justify-center space-x-4">
@@ -1437,9 +1457,14 @@
             return new Promise(resolve=>{
                 const wrap=document.createElement('div');
                 wrap.className = 'modal-overlay-bg fixed inset-0 flex items-center justify-center z-50';
-                wrap.innerHTML=`<div class="bg-secondary rounded-lg p-4 w-full max-w-xs shadow-xl">
+                // Construct the WhatsApp choice dialog using the modal-dialog
+                // class.  Using a dark container with light text ensures the
+                // message is readable against the opaque overlay.  The
+                // buttons inherit their styles from the existing Tailwind
+                // classes.
+                wrap.innerHTML=`<div class="modal-dialog rounded-lg p-4 w-full max-w-xs">
                     <h3 class="font-bold text-lg mb-2">Enviar por WhatsApp</h3>
-                    <p class="text-sm mb-4 text-text-secondary">¿Cómo quieres enviar este ticket?</p>
+                    <p class="text-sm mb-4">¿Cómo quieres enviar este ticket?</p>
                     <div class="flex flex-col gap-2">
                         <button id="wa-presupuesto" class="btn btn-secondary w-full">Solo Presupuesto</button>
                         <button id="wa-venta" class="btn btn-primary w-full">Finalizar Venta y Enviar</button>
