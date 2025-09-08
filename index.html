@@ -36,7 +36,11 @@
             --primary-color-hover: #4338ca; /* Indigo 700 */
             --header-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
             --card-shadow: 0 1px 3px 0 rgba(0,0,0,0.07), 0 1px 2px -1px rgba(0,0,0,0.07);
-            --modal-overlay: rgba(17, 24, 39, 0.5);
+            /* Increase modal overlay opacity from 0.5 to 0.6 to improve contrast
+               between dialogs and the underlying page.  This addresses user
+               feedback that the modals appeared too transparent and
+               distracting. */
+            --modal-overlay: rgba(17, 24, 39, 0.6);
         }
         html.dark {
             --bg-primary: #111827;
@@ -111,6 +115,23 @@
             background-color: var(--primary-color);
             color: white;
             box-shadow: 0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px 0 rgba(0,0,0,0.06);
+        }
+
+        /* Limit the width of the displayed user email to prevent horizontal
+           scrolling on small devices.  The label is hidden entirely on
+           small screens using the `hidden sm:inline-block` classes in the
+           markup.  This ensures that long email addresses do not distort
+           the header layout. */
+        #user-email-label {
+            max-width: 10rem;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        @media (max-width: 640px) {
+            #user-email-label {
+                display: none;
+            }
         }
        
         input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -1561,12 +1582,21 @@
                 }
                 let totalUSD = 0;
                 let reportHtml = '';
+                // Build an object to accumulate totals by payment method.
+                const paymentTotals = {};
                 filteredSales.forEach(sale => {
                     totalUSD += sale.total_usd;
-                    // Build a human‑readable label for the payment methods used.  Join
-                    // all keys of the payment_methods object (e.g. efectivo_usd,
-                    // zelle) with a comma.  If no methods are recorded, show
-                    // "Desconocido".
+                    // For each sale, accumulate totals per payment method.  The
+                    // payment_methods object has keys corresponding to the method and
+                    // values representing the amount in USD or VES.  We'll sum them
+                    // here for later reporting.
+                    try {
+                        const methods = sale.payment_methods || {};
+                        Object.keys(methods).forEach(key => {
+                            paymentTotals[key] = (paymentTotals[key] || 0) + Number(methods[key] || 0);
+                        });
+                    } catch {}
+                    // Build the human readable label for this sale.  Join all keys.
                     let paymentLabel = 'Desconocido';
                     try {
                         const keys = Object.keys(sale.payment_methods || {});
@@ -1591,6 +1621,33 @@
                 });
                 const endDate = new Date();
                 const rangeLabel = `${startDate.toLocaleDateString('es-VE')} – ${endDate.toLocaleDateString('es-VE')}`;
+                // Build a summary table of totals by payment method.  If there
+                // are any paymentTotals recorded, create a table listing each
+                // method and its aggregated amount.  Use the existing
+                // formatCurrency helper; determine currency based on the method
+                // name (if it contains "bs" treat as VES, otherwise USD).
+                let paymentTotalsHtml = '';
+                const paymentEntries = Object.entries(paymentTotals);
+                if (paymentEntries.length > 0) {
+                    paymentTotalsHtml = `
+                        <h3>Totales por Tipo de Pago</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Tipo de Pago</th>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${paymentEntries.map(([method, total]) => {
+                                    const currency = method.toLowerCase().includes('bs') ? 'VES' : 'USD';
+                                    return `<tr><td>${method}</td><td>${formatCurrency(total, currency)}</td></tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+
                 const fullHtml = `
                     <html>
                     <head>
@@ -1628,6 +1685,7 @@
                                 </tr>
                             </tbody>
                         </table>
+                        ${paymentTotalsHtml}
                     </body>
                     </html>
                 `;
@@ -2068,10 +2126,13 @@
                 if (!newPass) return;
                 try {
                     const response = await fetch('/.netlify/functions/manage-seller', {
-                        // Use PATCH to call our management endpoint.  Although
-                        // the Netlify function accepts both PUT and PATCH,
-                        // Supabase recommends PATCH for updating user fields.
-                        method: 'PATCH',
+                        // Use PUT when calling the management endpoint.  Our
+                        // function supports both PUT and PATCH, but some
+                        // deployments may treat PATCH differently and return
+                        // errors.  PUT ensures broader compatibility while
+                        // still allowing the function to internally use
+                        // PATCH against Supabase.
+                        method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id, password: newPass })
                     });
