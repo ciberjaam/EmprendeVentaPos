@@ -155,11 +155,17 @@
                 <button id="theme-toggle-btn" class="p-2 w-10 h-10 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center">
                     <i class="fas fa-moon text-gray-600 dark:text-gray-300"></i>
                 </button>
-                <button id="auth-button" class="p-2 w-10 h-10 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center">
+                <button id="auth-button" class="p-2 w-10 h-10 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center" title="">
                     <svg id="auth-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
                 </button>
+                <!-- Display the currently logged in user's email.  On small screens this
+                     element remains hidden to preserve layout, but on larger
+                     screens the email provides clear context about which
+                     account is active.  It will be populated dynamically in
+                     lockUIBySession(). -->
+                <span id="user-email-label" class="hidden sm:inline-block text-sm text-gray-600 dark:text-gray-300 truncate max-w-xs"></span>
             </div>
         </header>
 
@@ -378,7 +384,14 @@
         </div>
     </div>
     
-    <div id="toast" class="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg opacity-0 transition-opacity duration-300 max-w-md text-center">
+    <!--
+        Toast notification container.  Add a high z-index (z-50) so that
+        messages always appear above any modals or overlays.  Without this
+        class the toast could be hidden behind the semi‑transparent modal
+        backdrop, making feedback invisible when editing sellers or inputting
+        incorrect passwords.
+    -->
+    <div id="toast" class="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg opacity-0 transition-opacity duration-300 max-w-md text-center z-50">
          <p id="toast-message"></p>
     </div>
 
@@ -572,6 +585,11 @@
         const { createClient } = supabase;
         window.supabaseClient = null;
         let allProducts = [], session = null, currentModal = null;
+        // Persist the logged in user's email separately from the session
+        // because the offline fallback session only stores the user id.  We
+        // populate this field when a session is obtained from Supabase and
+        // restore it from localStorage when offline.
+        let userEmail = null;
         let appLoaded = false;
         window.cart = [];
         let deferredInstallPrompt = null;
@@ -1170,12 +1188,30 @@
         
         function lockUIBySession() {
             const locked = !session;
+            // Update the auth icon colour and shape depending on sign‑in status.
             DOM.authIcon.classList.toggle('text-green-500', !!session);
-            DOM.authIcon.innerHTML = session ? `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />` : `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />`;
+            DOM.authIcon.innerHTML = session ?
+                `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />` :
+                `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />`;
+            // Toggle visibility of logout button and disable/enable certain actions.
             document.getElementById('logout-button').classList.toggle('hidden', locked);
             ['btn-finalize', 'btn-wa', 'btn-summary', 'btn-manage-products', 'btn-analyze-sales'].forEach(id => {
-                 const el = document.getElementById(id); if (el) el.disabled = locked;
+                const el = document.getElementById(id);
+                if (el) el.disabled = locked;
             });
+            // Update the user email label.  If there is a stored email (userEmail),
+            // populate the span and show it; otherwise hide it.  Also set the
+            // tooltip of the auth button for accessibility.
+            const emailLabel = document.getElementById('user-email-label');
+            if (!locked && userEmail) {
+                emailLabel.textContent = userEmail;
+                emailLabel.classList.remove('hidden');
+                DOM.authButton.setAttribute('title', userEmail);
+            } else {
+                emailLabel.textContent = '';
+                emailLabel.classList.add('hidden');
+                DOM.authButton.setAttribute('title', '');
+            }
         }
         
         function buildTicket(cartData, rate) {
@@ -1527,6 +1563,17 @@
                 let reportHtml = '';
                 filteredSales.forEach(sale => {
                     totalUSD += sale.total_usd;
+                    // Build a human‑readable label for the payment methods used.  Join
+                    // all keys of the payment_methods object (e.g. efectivo_usd,
+                    // zelle) with a comma.  If no methods are recorded, show
+                    // "Desconocido".
+                    let paymentLabel = 'Desconocido';
+                    try {
+                        const keys = Object.keys(sale.payment_methods || {});
+                        if (keys.length > 0) {
+                            paymentLabel = keys.join(', ');
+                        }
+                    } catch {}
                     (sale.venta_items || []).forEach(item => {
                         const productName = item.productos ? item.productos.name : 'Producto Eliminado';
                         const subTotalUSD = item.quantity * item.price;
@@ -1537,6 +1584,7 @@
                                 <td class="text-right">${item.quantity}</td>
                                 <td class="text-right">${formatCurrency(item.price)}</td>
                                 <td class="text-right">${formatCurrency(subTotalUSD)}</td>
+                                <td>${paymentLabel}</td>
                             </tr>
                         `;
                     });
@@ -1569,12 +1617,13 @@
                                     <th class="text-right">Cantidad</th>
                                     <th class="text-right">Precio Unit.</th>
                                     <th class="text-right">Subtotal</th>
+                                    <th>Pago(s)</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${reportHtml}
                                 <tr class="total-row">
-                                    <td colspan="4">TOTAL PERIODO</td>
+                                    <td colspan="5">TOTAL PERIODO</td>
                                     <td class="text-right">${formatCurrency(totalUSD)}</td>
                                 </tr>
                             </tbody>
@@ -1671,6 +1720,14 @@
 
             const { data: { session: initialSession } } = await supabaseClient.auth.getSession();
             session = initialSession;
+            // If we have a session with an email, store it immediately.  This
+            // allows the email to persist in localStorage for offline use.  If
+            // there is no session yet, we will attempt to restore it from
+            // localStorage below.
+            if (session && session.user && session.user.email) {
+                userEmail = session.user.email;
+                try { localStorage.setItem('userEmail', userEmail); } catch {}
+            }
             // If there is no active session (offline or not logged in), attempt
             // to restore the previous user id and role from localStorage so
             // the app remains functional offline.  This allows recording
@@ -1678,9 +1735,11 @@
             if (!session) {
                 const storedId = localStorage.getItem('userId');
                 const storedRole = localStorage.getItem('userRole');
+                const storedEmail = localStorage.getItem('userEmail');
                 if (storedId) {
                     session = { user: { id: storedId } };
                     userRole = storedRole || null;
+                    userEmail = storedEmail || null;
                 }
             }
             lockUIBySession();
@@ -1698,7 +1757,16 @@
 
             supabaseClient.auth.onAuthStateChange((_event, newSession) => { 
                 const sessionChanged = session?.user?.id !== newSession?.user?.id;
-                session = newSession; 
+                session = newSession;
+                // Update the stored email whenever the session changes.  When
+                // logging in, store the new email; when logging out, clear it.
+                if (session && session.user && session.user.email) {
+                    userEmail = session.user.email;
+                    try { localStorage.setItem('userEmail', userEmail); } catch {}
+                } else {
+                    userEmail = null;
+                    try { localStorage.removeItem('userEmail'); } catch {}
+                }
                 lockUIBySession();
                 // Refresh user role and update UI whenever the auth session changes
                 if (session) {
@@ -2000,7 +2068,10 @@
                 if (!newPass) return;
                 try {
                     const response = await fetch('/.netlify/functions/manage-seller', {
-                        method: 'PUT',
+                        // Use PATCH to call our management endpoint.  Although
+                        // the Netlify function accepts both PUT and PATCH,
+                        // Supabase recommends PATCH for updating user fields.
+                        method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id, password: newPass })
                     });
