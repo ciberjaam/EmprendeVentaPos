@@ -36,11 +36,11 @@
             --primary-color-hover: #4338ca; /* Indigo 700 */
             --header-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
             --card-shadow: 0 1px 3px 0 rgba(0,0,0,0.07), 0 1px 2px -1px rgba(0,0,0,0.07);
-            /* Use a nearly opaque overlay for modals.  A high opacity (0.8)
-               ensures that the background page is dimmed significantly,
-               preventing the underlying content from distracting users
-               during confirmations and WhatsApp actions. */
-            --modal-overlay: rgba(17, 24, 39, 0.8);
+            /* Use a very opaque overlay for modals.  An opacity of 0.9 hides
+               most of the underlying content, ensuring that confirmation and
+               WhatsApp dialogs are the visual focus and no transparency
+               distracts the user. */
+            --modal-overlay: rgba(17, 24, 39, 0.9);
         }
         html.dark {
             --bg-primary: #111827;
@@ -53,7 +53,10 @@
             --primary-color-hover: #4f46e5; /* Indigo 600 */
             --header-shadow: 0 1px 2px 0 rgba(0,0,0,0.25);
             --card-shadow: 0 1px 3px 0 rgba(0,0,0,0.4), 0 1px 2px -1px rgba(0,0,0,0.4);
-            --modal-overlay: rgba(0, 0, 0, 0.7);
+            /* Dark mode overlay nearly opaque for modals to minimise
+               transparency.  A value of 0.85 dims the background while
+               allowing some subtle context. */
+            --modal-overlay: rgba(0, 0, 0, 0.85);
         }
 
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-primary); color: var(--text-primary); -webkit-tap-highlight-color: transparent; }
@@ -1607,12 +1610,16 @@
                         Object.keys(methods).forEach(key => {
                             const amount = Number(methods[key] || 0);
                             const rate   = sale.exchange_rate || 0;
-                            // Determine original currency from the key: keys containing
-                            // 'bs' represent amounts in bolívares, otherwise USD.
+                            // Determine original currency based on the method name.  Keys
+                            // containing 'bs' or 'movil' are considered bolívares; all
+                            // others are USD.  This logic prevents misclassification of
+                            // payment methods such as "pago_movil" which do not include
+                            // 'bs' but are denominated in bolívares.
+                            const lower = key.toLowerCase();
+                            const isBsMethod = lower.includes('bs') || lower.includes('movil');
                             let usdAmount = 0;
                             let bsAmount  = 0;
-                            if (key.toLowerCase().includes('bs')) {
-                                // Convert bolívares to USD using the sale's exchange rate.
+                            if (isBsMethod) {
                                 bsAmount  = amount;
                                 usdAmount = rate ? amount / rate : 0;
                             } else {
