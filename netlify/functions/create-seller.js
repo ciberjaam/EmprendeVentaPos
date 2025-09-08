@@ -1,78 +1,76 @@
-// `fetch` es global en Node 18+, no se requiere importar `node-fetch`.
+const fetch = (...args) => import("node-fetch").then(({default: fetch}) => fetch(...args));
 
-/*
- * Serverless function to create a new seller (usuario con rol 'seller').
- * Este endpoint se invoca desde el frontend cuando un administrador desea
- * registrar a un nuevo vendedor sin tener que acceder al panel de Supabase.
- *
- * Requiere que en las variables de entorno estén definidos:
- *   - SUPABASE_URL: la URL base del proyecto Supabase, por ejemplo
- *     https://xyzcompany.supabase.co
- *   - SUPABASE_SERVICE_ROLE_KEY: la clave de servicio de Supabase con
- *     permisos administrativos. Esta clave nunca se expone al frontend.
- *
- * El flujo que implementa es:
- *   1. Crear un usuario usando la API de administración de auth de Supabase
- *      mediante una llamada POST a /auth/v1/admin/users con email y password.
- *   2. Esperar brevemente para que el trigger de Supabase cree el perfil
- *      predeterminado con rol 'buyer'.
- *   3. Actualizar la fila en la tabla 'profiles' para establecer el rol
- *      'seller'. Utiliza la API REST de Supabase (servicio de PostgREST).
- */
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "POST, OPTIONS"
+  };
+
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 200, headers: cors, body: "OK" };
   }
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "Method not allowed" }) };
+  }
+
   try {
-    const { email, password } = JSON.parse(event.body || '{}');
+    const { email, password } = JSON.parse(event.body || "{}");
     if (!email || !password) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Email y contraseña son obligatorios' }) };
+      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: "Email y password requeridos" }) };
     }
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!SUPABASE_URL || !SERVICE_KEY) {
-      return { statusCode: 500, body: JSON.stringify({ error: 'Variables de entorno faltantes' }) };
-    }
-    // Paso 1: crear usuario
-    const createUserRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-      method: 'POST',
+
+    // Crear usuario
+    const resCreate = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'apikey': SERVICE_KEY,
-        'Authorization': `Bearer ${SERVICE_KEY}`
+        apikey: SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ email, password, email_confirm: true })
     });
-    const createUserData = await createUserRes.json();
-    if (!createUserRes.ok) {
-      const errorMsg = createUserData?.message || createUserData?.error || 'Error creando usuario';
-      return { statusCode: createUserRes.status, body: JSON.stringify({ error: errorMsg }) };
+
+    const createText = await resCreate.text();
+    let createJson;
+    try { createJson = JSON.parse(createText); } catch { createJson = { raw: createText }; }
+
+    let userId = createJson?.user?.id || createJson?.id || null;
+
+    // Si el usuario ya existe (422)
+    if (resCreate.status === 422 || !userId) {
+      const resLookup = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
+        headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` }
+      });
+      const lookupJson = await resLookup.json();
+      userId = lookupJson?.[0]?.id || lookupJson?.user?.id || null;
+      if (!userId) {
+        return { statusCode: 422, headers: cors, body: JSON.stringify({ error: "No se pudo obtener ID de usuario" }) };
+      }
     }
-    const userId = createUserData.user?.id;
-    if (!userId) {
-      return { statusCode: 500, body: JSON.stringify({ error: 'No se pudo obtener ID del usuario' }) };
-    }
-    // Espera breve para que el trigger cree la fila del perfil
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    // Paso 2: actualizar rol a 'seller'
-    const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
-      method: 'PATCH',
+
+    // Upsert en profiles como seller
+    const resUpsert = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'apikey': SERVICE_KEY,
-        'Authorization': `Bearer ${SERVICE_KEY}`,
-        'Prefer': 'return=representation'
+        apikey: SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates"
       },
-      body: JSON.stringify({ role: 'seller' })
+      body: JSON.stringify({ id: userId, role: "seller" })
     });
-    const updateData = await updateRes.json();
-    if (!updateRes.ok) {
-      const errMsg = updateData?.message || updateData?.error || 'Error actualizando rol';
-      return { statusCode: updateRes.status, body: JSON.stringify({ error: errMsg }) };
+
+    if (!resUpsert.ok) {
+      const errText = await resUpsert.text();
+      return { statusCode: 500, headers: cors, body: JSON.stringify({ error: "Falló al asignar rol seller", detail: errText }) };
     }
-    return { statusCode: 200, body: JSON.stringify({ message: 'Vendedor creado', userId }) };
+
+    return { statusCode: 200, headers: cors, body: JSON.stringify({ ok: true, userId }) };
   } catch (err) {
-    return { statusCode: 500, body: JSON.stringify({ error: err.message || 'Internal Server Error' }) };
+    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: err.message }) };
   }
 };
