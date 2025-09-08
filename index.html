@@ -1589,11 +1589,11 @@
                 let totalUSD = 0;
                 let totalBs = 0;
                 let reportHtml = '';
-                // Build an object to accumulate totals by payment method.  Each
-                // entry holds both USD and Bs values so they can be reported
-                // concurrently at the end.  Structure:
-                // { methodName: { usd: number, bs: number } }
-                const paymentTotals = {};
+                // Build an object to accumulate totals by payment method.  For
+                // reporting clarity, we record the sum of each method in its
+                // original currency rather than converting between currencies.
+                // Each entry has the shape { value: number, currency: 'USD'|'VES' }.
+                const paymentTotalsOriginal = {};
                 filteredSales.forEach(sale => {
                     totalUSD += sale.total_usd;
                     // Compute total Bs for the sale using its exchange rate.  If
@@ -1609,26 +1609,11 @@
                         const methods = sale.payment_methods || {};
                         Object.keys(methods).forEach(key => {
                             const amount = Number(methods[key] || 0);
-                            const rate   = sale.exchange_rate || 0;
-                            // Determine original currency based on the method name.  Keys
-                            // containing 'bs' or 'movil' are considered bolívares; all
-                            // others are USD.  This logic prevents misclassification of
-                            // payment methods such as "pago_movil" which do not include
-                            // 'bs' but are denominated in bolívares.
-                            const lower = key.toLowerCase();
+                            const lower  = key.toLowerCase();
                             const isBsMethod = lower.includes('bs') || lower.includes('movil');
-                            let usdAmount = 0;
-                            let bsAmount  = 0;
-                            if (isBsMethod) {
-                                bsAmount  = amount;
-                                usdAmount = rate ? amount / rate : 0;
-                            } else {
-                                usdAmount = amount;
-                                bsAmount  = rate ? amount * rate : 0;
-                            }
-                            if (!paymentTotals[key]) paymentTotals[key] = { usd: 0, bs: 0 };
-                            paymentTotals[key].usd += usdAmount;
-                            paymentTotals[key].bs += bsAmount;
+                            const currency = isBsMethod ? 'VES' : 'USD';
+                            if (!paymentTotalsOriginal[key]) paymentTotalsOriginal[key] = { value: 0, currency };
+                            paymentTotalsOriginal[key].value += amount;
                         });
                     } catch {}
                     // Build the human readable label for this sale.  Join all keys.
@@ -1665,13 +1650,13 @@
                 // formatCurrency helper; determine currency based on the method
                 // name (if it contains "bs" treat as VES, otherwise USD).
                 let paymentTotalsHtml = '';
-                const paymentEntries = Object.entries(paymentTotals);
-                if (paymentEntries.length > 0) {
+                const paymentEntriesOrig = Object.entries(paymentTotalsOriginal);
+                if (paymentEntriesOrig.length > 0) {
                     // Compute general totals across all payment methods by summing
-                    // the USD and Bs values of each method.
-                    const generalTotals = paymentEntries.reduce((acc, [, totals]) => {
-                        acc.usd += totals.usd;
-                        acc.bs  += totals.bs;
+                    // the original amounts in their respective currencies.
+                    const generalTotals = paymentEntriesOrig.reduce((acc, [, info]) => {
+                        if (info.currency === 'USD') acc.usd += info.value;
+                        else if (info.currency === 'VES') acc.bs += info.value;
                         return acc;
                     }, { usd: 0, bs: 0 });
                     paymentTotalsHtml = `
@@ -1680,13 +1665,14 @@
                             <thead>
                                 <tr>
                                     <th>Tipo de Pago</th>
-                                    <th>Total USD</th>
-                                    <th>Total Bs</th>
+                                    <th>Total</th>
+                                    <th>Moneda</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${paymentEntries.map(([method, totals]) => {
-                                    return `<tr><td>${method}</td><td>${formatCurrency(totals.usd)}</td><td>${formatCurrency(totals.bs, 'VES')}</td></tr>`;
+                                ${paymentEntriesOrig.map(([method, info]) => {
+                                    const formatted = formatCurrency(info.value, info.currency === 'USD' ? 'USD' : 'VES');
+                                    return `<tr><td>${method}</td><td>${formatted}</td><td>${info.currency === 'USD' ? '$' : 'Bs'}</td></tr>`;
                                 }).join('')}
                             </tbody>
                         </table>
