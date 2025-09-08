@@ -68,8 +68,11 @@
          * overly transparent and distracting.
          */
         .modal-overlay-bg {
+            /* Use a solid overlay colour without blur.  Transparency was
+               removed because users found semi‑transparent modals
+               distracting.  The overlay colour and opacity are defined
+               in the CSS variables above. */
             background-color: var(--modal-overlay);
-            backdrop-filter: blur(4px);
         }
 
         .btn { @apply font-bold py-2 px-4 rounded-lg transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed; }
@@ -1581,11 +1584,17 @@
                     }
                 }
                 let totalUSD = 0;
+                let totalBs = 0;
                 let reportHtml = '';
                 // Build an object to accumulate totals by payment method.
                 const paymentTotals = {};
                 filteredSales.forEach(sale => {
                     totalUSD += sale.total_usd;
+                    // Compute total Bs for the sale using its exchange rate.  If
+                    // exchange_rate is null or zero, skip to avoid NaN.
+                    if (sale.exchange_rate) {
+                        totalBs += sale.total_usd * sale.exchange_rate;
+                    }
                     // For each sale, accumulate totals per payment method.  The
                     // payment_methods object has keys corresponding to the method and
                     // values representing the amount in USD or VES.  We'll sum them
@@ -1607,13 +1616,16 @@
                     (sale.venta_items || []).forEach(item => {
                         const productName = item.productos ? item.productos.name : 'Producto Eliminado';
                         const subTotalUSD = item.quantity * item.price;
+                        // Compute the subtotal in bolívares using the sale's exchange rate.  If
+                        // no rate is available, default to 0 for Bs.
+                        const subTotalBs = sale.exchange_rate ? subTotalUSD * sale.exchange_rate : 0;
                         reportHtml += `
                             <tr>
                                 <td>${new Date(sale.created_at).toLocaleString('es-VE')}</td>
                                 <td>${productName}</td>
                                 <td class="text-right">${item.quantity}</td>
-                                <td class="text-right">${formatCurrency(item.price)}</td>
                                 <td class="text-right">${formatCurrency(subTotalUSD)}</td>
+                                <td class="text-right">${formatCurrency(subTotalBs, 'VES')}</td>
                                 <td>${paymentLabel}</td>
                             </tr>
                         `;
@@ -1629,6 +1641,12 @@
                 let paymentTotalsHtml = '';
                 const paymentEntries = Object.entries(paymentTotals);
                 if (paymentEntries.length > 0) {
+                    // Compute general totals across all payment methods.
+                    const generalTotals = paymentEntries.reduce((acc, [method, total]) => {
+                        if (method.toLowerCase().includes('bs')) acc.bs += total;
+                        else acc.usd += total;
+                        return acc;
+                    }, { usd: 0, bs: 0 });
                     paymentTotalsHtml = `
                         <h3>Totales por Tipo de Pago</h3>
                         <table>
@@ -1645,6 +1663,8 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        <p><strong>Total General USD:</strong> ${formatCurrency(generalTotals.usd)}</p>
+                        <p><strong>Total General Bs:</strong> ${formatCurrency(generalTotals.bs, 'VES')}</p>
                     `;
                 }
 
@@ -1666,25 +1686,27 @@
                         <h1>Resumen de Ventas</h1>
                         <h2>${rangeLabel}</h2>
                         ${paymentFilter ? `<p><strong>Tipo de pago:</strong> ${paymentFilter}</p>` : ''}
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Fecha y Hora</th>
-                                    <th>Producto</th>
-                                    <th class="text-right">Cantidad</th>
-                                    <th class="text-right">Precio Unit.</th>
-                                    <th class="text-right">Subtotal</th>
-                                    <th>Pago(s)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${reportHtml}
-                                <tr class="total-row">
-                                    <td colspan="5">TOTAL PERIODO</td>
-                                    <td class="text-right">${formatCurrency(totalUSD)}</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                         <table>
+                             <thead>
+                                 <tr>
+                                     <th>Fecha y Hora</th>
+                                     <th>Producto</th>
+                                     <th class="text-right">Cantidad</th>
+                                     <th class="text-right">Subtotal USD</th>
+                                     <th class="text-right">Subtotal Bs</th>
+                                     <th>Pago(s)</th>
+                                 </tr>
+                             </thead>
+                             <tbody>
+                                 ${reportHtml}
+                                 <tr class="total-row">
+                                     <td colspan="3">TOTAL PERIODO</td>
+                                     <td class="text-right">${formatCurrency(totalUSD)}</td>
+                                     <td class="text-right">${formatCurrency(totalBs, 'VES')}</td>
+                                     <td></td>
+                                 </tr>
+                             </tbody>
+                         </table>
                         ${paymentTotalsHtml}
                     </body>
                     </html>
@@ -2104,17 +2126,18 @@
                 filtered.forEach(seller => {
                     const row = document.createElement('div');
                     row.className = 'flex justify-between items-center border-b border-border-color p-2 last:border-b-0';
+                    // Only render the delete button.  Editing seller passwords has
+                    // been disabled due to recurring errors with the Supabase
+                    // update endpoint.  Administrators can still create and
+                    // remove sellers via the other controls.
                     row.innerHTML = `
                         <div><p class="font-medium">${seller.email}</p></div>
                         <div class="flex gap-2">
-                            <button class="edit-seller-btn btn btn-secondary text-xs py-1 px-2" data-id="${seller.id}" data-email="${seller.email}">Editar</button>
                             <button class="delete-seller-btn btn btn-danger text-xs py-1 px-2" data-id="${seller.id}" data-email="${seller.email}">Eliminar</button>
                         </div>`;
                     container.appendChild(row);
                 });
-                container.querySelectorAll('.edit-seller-btn').forEach(btn => {
-                    btn.addEventListener('click', handleEditSeller);
-                });
+                // Attach only the delete handler because editing is disabled.
                 container.querySelectorAll('.delete-seller-btn').forEach(btn => {
                     btn.addEventListener('click', handleDeleteSeller);
                 });
