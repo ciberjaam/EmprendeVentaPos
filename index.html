@@ -36,11 +36,11 @@
             --primary-color-hover: #4338ca; /* Indigo 700 */
             --header-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
             --card-shadow: 0 1px 3px 0 rgba(0,0,0,0.07), 0 1px 2px -1px rgba(0,0,0,0.07);
-            /* Increase modal overlay opacity from 0.5 to 0.6 to improve contrast
-               between dialogs and the underlying page.  This addresses user
-               feedback that the modals appeared too transparent and
-               distracting. */
-            --modal-overlay: rgba(17, 24, 39, 0.6);
+            /* Use a nearly opaque overlay for modals.  A high opacity (0.8)
+               ensures that the background page is dimmed significantly,
+               preventing the underlying content from distracting users
+               during confirmations and WhatsApp actions. */
+            --modal-overlay: rgba(17, 24, 39, 0.8);
         }
         html.dark {
             --bg-primary: #111827;
@@ -1586,7 +1586,10 @@
                 let totalUSD = 0;
                 let totalBs = 0;
                 let reportHtml = '';
-                // Build an object to accumulate totals by payment method.
+                // Build an object to accumulate totals by payment method.  Each
+                // entry holds both USD and Bs values so they can be reported
+                // concurrently at the end.  Structure:
+                // { methodName: { usd: number, bs: number } }
                 const paymentTotals = {};
                 filteredSales.forEach(sale => {
                     totalUSD += sale.total_usd;
@@ -1602,7 +1605,23 @@
                     try {
                         const methods = sale.payment_methods || {};
                         Object.keys(methods).forEach(key => {
-                            paymentTotals[key] = (paymentTotals[key] || 0) + Number(methods[key] || 0);
+                            const amount = Number(methods[key] || 0);
+                            const rate   = sale.exchange_rate || 0;
+                            // Determine original currency from the key: keys containing
+                            // 'bs' represent amounts in bolívares, otherwise USD.
+                            let usdAmount = 0;
+                            let bsAmount  = 0;
+                            if (key.toLowerCase().includes('bs')) {
+                                // Convert bolívares to USD using the sale's exchange rate.
+                                bsAmount  = amount;
+                                usdAmount = rate ? amount / rate : 0;
+                            } else {
+                                usdAmount = amount;
+                                bsAmount  = rate ? amount * rate : 0;
+                            }
+                            if (!paymentTotals[key]) paymentTotals[key] = { usd: 0, bs: 0 };
+                            paymentTotals[key].usd += usdAmount;
+                            paymentTotals[key].bs += bsAmount;
                         });
                     } catch {}
                     // Build the human readable label for this sale.  Join all keys.
@@ -1641,10 +1660,11 @@
                 let paymentTotalsHtml = '';
                 const paymentEntries = Object.entries(paymentTotals);
                 if (paymentEntries.length > 0) {
-                    // Compute general totals across all payment methods.
-                    const generalTotals = paymentEntries.reduce((acc, [method, total]) => {
-                        if (method.toLowerCase().includes('bs')) acc.bs += total;
-                        else acc.usd += total;
+                    // Compute general totals across all payment methods by summing
+                    // the USD and Bs values of each method.
+                    const generalTotals = paymentEntries.reduce((acc, [, totals]) => {
+                        acc.usd += totals.usd;
+                        acc.bs  += totals.bs;
                         return acc;
                     }, { usd: 0, bs: 0 });
                     paymentTotalsHtml = `
@@ -1653,13 +1673,13 @@
                             <thead>
                                 <tr>
                                     <th>Tipo de Pago</th>
-                                    <th>Total</th>
+                                    <th>Total USD</th>
+                                    <th>Total Bs</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${paymentEntries.map(([method, total]) => {
-                                    const currency = method.toLowerCase().includes('bs') ? 'VES' : 'USD';
-                                    return `<tr><td>${method}</td><td>${formatCurrency(total, currency)}</td></tr>`;
+                                ${paymentEntries.map(([method, totals]) => {
+                                    return `<tr><td>${method}</td><td>${formatCurrency(totals.usd)}</td><td>${formatCurrency(totals.bs, 'VES')}</td></tr>`;
                                 }).join('')}
                             </tbody>
                         </table>
