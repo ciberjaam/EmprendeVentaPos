@@ -1,4 +1,5 @@
-const CACHE_NAME = 'emprende-venta-pos-cache-v6'; // Versión incrementada para forzar la actualización
+// Incrementa el nombre de la caché para asegurar que los clientes descarguen la última versión
+const CACHE_NAME = 'emprende-venta-pos-cache-v7';
 const urlsToCache = [
     './',
     './index.html',
