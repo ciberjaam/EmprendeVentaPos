@@ -1,5 +1,9 @@
 // Incrementa el nombre de la caché para asegurar que los clientes descarguen la última versión
-const CACHE_NAME = 'emprende-venta-pos-cache-v7';
+// Bump the cache name whenever the application assets change.  Changing this
+// string forces the service worker to fetch and cache the new versions of
+// index.html and other resources, avoiding stale files when the app is
+// installed as a PWA.  Increment the suffix to invalidate old caches.
+const CACHE_NAME = 'emprende-venta-pos-cache-v8';
 const urlsToCache = [
     './',
     './index.html',

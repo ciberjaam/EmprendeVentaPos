@@ -1075,7 +1075,13 @@
             paymentMethodsConfig.forEach(method => {
                 const el = document.createElement('div');
                 el.className = 'flex items-center gap-3';
-                el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" id="payment-${method.id}" data-method="${method.id}" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
+                // When generating payment inputs we explicitly allow decimal values and hint to
+                // mobile browsers that a decimal keypad is appropriate.  Without a step
+                // attribute mobile keyboards may only permit integer entry, and many
+                // locales use a comma as the decimal separator which parseFloat does
+                // not understand.  Adding `step="0.01"` and `inputmode="decimal"` fixes
+                // both issues.
+                el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" step="0.01" inputmode="decimal" id="payment-${method.id}" data-method="${method.id}" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
                 container.appendChild(el);
             });
             container.querySelectorAll('.payment-input').forEach(input => input.addEventListener('input', updatePaymentBalance));
@@ -1084,7 +1090,24 @@
 
         function updatePaymentBalance() {
             const totalUSD = window.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            let paidAmount = 0; document.querySelectorAll('.payment-input').forEach(input => { paidAmount += parseFloat(input.value) || 0; });
+            let paidAmount = 0;
+            // Sum all entered payment amounts.  Mobile browsers in Spanish locales
+            // often use a comma as the decimal separator (e.g. "3,50"), which
+            // `parseFloat` ignores after the comma and results in an integer.  To
+            // support both dot and comma decimals we normalise the string by
+            // replacing the first comma with a dot before parsing.  Also, if the
+            // input is empty or cannot be parsed, treat it as zero.
+            document.querySelectorAll('.payment-input').forEach(input => {
+                let value = input.value || '';
+                // Replace comma with dot only for the first occurrence to avoid
+                // interfering with thousands separators should they ever appear.
+                if (value.includes(',')) {
+                    const parts = value.split(',');
+                    value = parts.shift() + '.' + parts.join('');
+                }
+                const amount = value.trim() === '' ? 0 : parseFloat(value);
+                paidAmount += isNaN(amount) ? 0 : amount;
+            });
             const remaining = totalUSD - paidAmount; const remainingEl = document.getElementById('payment-remaining'); const confirmBtn = document.getElementById('confirm-payment-btn');
             if (Math.abs(remaining) < 0.001) { remainingEl.className = 'text-xl font-bold text-green-500'; remainingEl.textContent = '¡Pagado!'; confirmBtn.disabled = false; }
             else if (remaining < 0) { remainingEl.className = 'text-xl font-bold text-yellow-500'; remainingEl.textContent = `Cambio: ${formatCurrency(Math.abs(remaining))}`; confirmBtn.disabled = false; }
@@ -2325,16 +2348,39 @@
 
             document.getElementById('quantity-modal-confirm').addEventListener('click', () => {
                 const p = allProducts.find(p => p.id === document.getElementById('quantity-product-id').value); if(!p) return;
-                const quantity = parseFloat(document.getElementById('quantity-input').value); if (isNaN(quantity) || quantity <= 0) { showToast('Cantidad inválida'); return; }
+                let qtyValue = document.getElementById('quantity-input').value;
+                if (qtyValue.includes(',')) {
+                    const parts = qtyValue.split(',');
+                    qtyValue = parts.shift() + '.' + parts.join('');
+                }
+                const quantity = parseFloat(qtyValue);
+                if (isNaN(quantity) || quantity <= 0) { showToast('Cantidad inválida'); return; }
                 let price = p.price;
-                if (p.allow_manual_price) { const newPrice = parseFloat(document.getElementById('manual-price-input').value); if(isNaN(newPrice) || newPrice < 0){ showToast('Precio inválido'); return; } price = newPrice; }
+                if (p.allow_manual_price) {
+                    let priceVal = document.getElementById('manual-price-input').value;
+                    if (priceVal.includes(',')) {
+                        const parts = priceVal.split(',');
+                        priceVal = parts.shift() + '.' + parts.join('');
+                    }
+                    const newPrice = parseFloat(priceVal);
+                    if(isNaN(newPrice) || newPrice < 0){ showToast('Precio inválido'); return; }
+                    price = newPrice;
+                }
                 addToCart(p, quantity, price); closeModal();
             });
 
             document.getElementById('btn-finalize').addEventListener('click', () => { if (!session) { showToast('Debes iniciar sesión'); return; } if (window.cart.length === 0) { showToast('El carrito está vacío'); return; } openPaymentModal(); closeCartDrawer(); });
             document.getElementById('confirm-payment-btn').addEventListener('click', async () => {
                 const paymentMethods = {};
-                document.querySelectorAll('.payment-input').forEach(input => { const amount = parseFloat(input.value) || 0; if (amount > 0) paymentMethods[input.dataset.method] = amount; });
+                document.querySelectorAll('.payment-input').forEach(input => {
+                    let value = input.value || '';
+                    if (value.includes(',')) {
+                        const parts = value.split(',');
+                        value = parts.shift() + '.' + parts.join('');
+                    }
+                    const amount = value.trim() === '' ? 0 : parseFloat(value);
+                    if (!isNaN(amount) && amount > 0) paymentMethods[input.dataset.method] = amount;
+                });
                 if (await safeRecordSale(paymentMethods)) { clearCartAndNotify(); closeModal(); }
             });
             document.getElementById('btn-wa').addEventListener('click', async () => {
