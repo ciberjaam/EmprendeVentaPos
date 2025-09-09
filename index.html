@@ -2362,10 +2362,30 @@
             });
 
             document.getElementById('btn-finalize').addEventListener('click', () => { if (!session) { showToast('Debes iniciar sesión'); return; } if (window.cart.length === 0) { showToast('El carrito está vacío'); return; } openPaymentModal(); closeCartDrawer(); });
-            document.getElementById('confirm-payment-btn').addEventListener('click', async () => {
+            // Handler for confirming the payment.  Extracts the amounts from
+            // each payment input and calls safeRecordSale().  Defined once
+            // to reuse for both click and touch events.
+            const handleConfirmPayment = async () => {
                 const paymentMethods = {};
-                document.querySelectorAll('.payment-input').forEach(input => { const amount = parseFloat(input.value) || 0; if (amount > 0) paymentMethods[input.dataset.method] = amount; });
-                if (await safeRecordSale(paymentMethods)) { clearCartAndNotify(); closeModal(); }
+                document.querySelectorAll('.payment-input').forEach(input => {
+                    // Normalize any comma separators to dots before parsing.
+                    const val = (input.value || '').replace(',', '.');
+                    const amount = parseFloat(val) || 0;
+                    if (amount > 0) paymentMethods[input.dataset.method] = amount;
+                });
+                if (await safeRecordSale(paymentMethods)) {
+                    clearCartAndNotify();
+                    closeModal();
+                }
+            };
+            const confirmBtnEl = document.getElementById('confirm-payment-btn');
+            confirmBtnEl.addEventListener('click', handleConfirmPayment);
+            // Attach touchstart for mobile devices so the confirm action also
+            // triggers on tap.  preventDefault() stops the event from
+            // potentially firing twice on some browsers.
+            confirmBtnEl.addEventListener('touchstart', e => {
+                e.preventDefault();
+                handleConfirmPayment();
             });
             document.getElementById('btn-wa').addEventListener('click', async () => {
                 if(window.cart.length === 0) { showToast('El carrito está vacío.'); return; }
