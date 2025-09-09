@@ -1859,9 +1859,17 @@
             // allows the email to persist in localStorage for offline use.  If
             // there is no session yet, we will attempt to restore it from
             // localStorage below.
-            if (session && session.user && session.user.email) {
-                userEmail = session.user.email;
-                try { localStorage.setItem('userEmail', userEmail); } catch {}
+            if (session && session.user) {
+                // Persist the user email and id immediately upon session retrieval.
+                // Storing the id early ensures that offline sales have an identifier
+                // even if the role fetch fails or the app is offline.
+                if (session.user.email) {
+                    userEmail = session.user.email;
+                    try { localStorage.setItem('userEmail', userEmail); } catch {}
+                }
+                if (session.user.id) {
+                    try { localStorage.setItem('userId', session.user.id); } catch {}
+                }
             }
             // If there is no active session (offline or not logged in), attempt
             // to restore the previous user id and role from localStorage so
@@ -1893,14 +1901,20 @@
             supabaseClient.auth.onAuthStateChange((_event, newSession) => { 
                 const sessionChanged = session?.user?.id !== newSession?.user?.id;
                 session = newSession;
-                // Update the stored email whenever the session changes.  When
-                // logging in, store the new email; when logging out, clear it.
-                if (session && session.user && session.user.email) {
-                    userEmail = session.user.email;
-                    try { localStorage.setItem('userEmail', userEmail); } catch {}
+                // Update stored identifiers whenever the session changes.
+                // When logging in, store the email and id; when logging out, clear them.
+                if (session && session.user) {
+                    if (session.user.email) {
+                        userEmail = session.user.email;
+                        try { localStorage.setItem('userEmail', userEmail); } catch {}
+                    }
+                    if (session.user.id) {
+                        try { localStorage.setItem('userId', session.user.id); } catch {}
+                    }
                 } else {
                     userEmail = null;
                     try { localStorage.removeItem('userEmail'); } catch {}
+                    try { localStorage.removeItem('userId'); } catch {}
                 }
                 lockUIBySession();
                 // Refresh user role and update UI whenever the auth session changes
