@@ -686,10 +686,19 @@
          */
         function updateUIByRole() {
             // Determine role flags.  Administrators inherit seller permissions.
-            const isAdmin  = userRole === 'admin';
-            const isSeller = userRole === 'seller' || isAdmin;
+            // Si userRole no está definido (por ejemplo, al usar la aplicación
+            // offline) se intenta recuperar el rol almacenado en localStorage.
+            let effectiveRole = userRole;
+            try {
+                if (!effectiveRole) {
+                    const storedRole = localStorage.getItem('userRole');
+                    if (storedRole) effectiveRole = storedRole;
+                }
+            } catch {}
+            const isAdmin  = effectiveRole === 'admin';
+            const isSeller = effectiveRole === 'seller' || isAdmin;
             // Consider unauthenticated visitors as buyers so they can view the catalog
-            const isBuyer  = !session || userRole === 'buyer';
+            const isBuyer  = !session || effectiveRole === 'buyer';
 
             // Gestión del catálogo sólo para administradores
             const manageBtn = document.getElementById('btn-manage-products');
@@ -720,11 +729,23 @@
             }
 
             // Opciones de venta (finalizar venta y WhatsApp) accesibles para vendedores y administradores.
+            //
+            // En PWAs y dispositivos móviles a menudo se pierde la sesión de Supabase
+            // cuando no hay conexión, pero aún puede existir un identificador de usuario
+            // guardado en localStorage (userId).  Si solo comprobamos `session`, los
+            // botones de finalizar venta y WhatsApp permanecen ocultos u inhabilitados
+            // a pesar de que el usuario ya inició sesión previamente.  Para mejorar
+            // la experiencia offline, determinamos la visibilidad y el estado de
+            // estos botones considerando tanto la sesión actual como un userId
+            // almacenado.  Sólo cuando el usuario es vendedor o administrador y
+            // existe una sesión o un ID almacenado se muestran y habilitan los
+            // botones de venta.
             ['btn-finalize', 'btn-wa'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
-                    el.classList.toggle('hidden', !isSeller || !session);
-                    el.disabled = !session || !isSeller;
+                    const hasSessionOrStoredId = !!session || !!localStorage.getItem('userId');
+                    el.classList.toggle('hidden', !isSeller || !hasSessionOrStoredId);
+                    el.disabled = !hasSessionOrStoredId || !isSeller;
                 }
             });
             // El resumen del día sólo lo ve el administrador
@@ -1084,7 +1105,13 @@
                 el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" step="0.01" inputmode="decimal" id="payment-${method.id}" data-method="${method.id}" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
                 container.appendChild(el);
             });
-            container.querySelectorAll('.payment-input').forEach(input => input.addEventListener('input', updatePaymentBalance));
+            container.querySelectorAll('.payment-input').forEach(input => {
+                input.addEventListener('input', updatePaymentBalance);
+                // Algunos navegadores móviles sólo disparan el evento 'change'
+                // al finalizar la edición.  Para asegurar que el saldo se
+                // actualiza correctamente, escuchamos también este evento.
+                input.addEventListener('change', updatePaymentBalance);
+            });
             updatePaymentBalance(); openModal('payment-modal');
         }
 
@@ -1099,19 +1126,53 @@
             // input is empty or cannot be parsed, treat it as zero.
             document.querySelectorAll('.payment-input').forEach(input => {
                 let value = input.value || '';
-                // Replace comma with dot only for the first occurrence to avoid
-                // interfering with thousands separators should they ever appear.
-                if (value.includes(',')) {
-                    const parts = value.split(',');
-                    value = parts.shift() + '.' + parts.join('');
+                // Normalizar formato numérico eliminando separadores de miles y
+                // sustituyendo todas las comas por puntos para soportar
+                // correctamente teclados en español.  De este modo,
+                // entradas como "1.234,56" se convierten en "1234.56".
+                // Si el valor contiene tanto puntos como comas asumimos que los
+                // puntos son separadores de miles y la coma es el separador
+                // decimal (formato europeo).  Eliminamos todos los puntos y
+                // sustituimos la coma por un punto.  En caso contrario, si
+                // sólo hay comas, las tratamos como separadores decimales.
+                // Si sólo hay puntos, se asume formato anglosajón y no se
+                // modifica.
+                if (value.includes(',') && value.includes('.')) {
+                    value = value.replace(/\./g, '').replace(/,/g, '.');
+                } else if (value.includes(',')) {
+                    value = value.replace(/,/g, '.');
                 }
                 const amount = value.trim() === '' ? 0 : parseFloat(value);
                 paidAmount += isNaN(amount) ? 0 : amount;
             });
-            const remaining = totalUSD - paidAmount; const remainingEl = document.getElementById('payment-remaining'); const confirmBtn = document.getElementById('confirm-payment-btn');
-            if (Math.abs(remaining) < 0.001) { remainingEl.className = 'text-xl font-bold text-green-500'; remainingEl.textContent = '¡Pagado!'; confirmBtn.disabled = false; }
-            else if (remaining < 0) { remainingEl.className = 'text-xl font-bold text-yellow-500'; remainingEl.textContent = `Cambio: ${formatCurrency(Math.abs(remaining))}`; confirmBtn.disabled = false; }
-            else { remainingEl.className = 'text-xl font-bold text-red-500'; remainingEl.textContent = `Restante: ${formatCurrency(remaining)}`; confirmBtn.disabled = true; }
+            const remaining = totalUSD - paidAmount;
+            const remainingEl = document.getElementById('payment-remaining');
+            const confirmBtn = document.getElementById('confirm-payment-btn');
+            /*
+             * Determine the payment status.  On some devices floating point
+             * calculations introduce tiny rounding errors (e.g. 2.4999999)
+             * that prevent the remaining amount from ever reaching exactly
+             * zero.  To avoid leaving the confirm button disabled when the
+             * user has effectively paid the total, treat any absolute
+             * difference up to one cent as fully paid.  If the user has
+             * overpaid (negative remaining), show the change due.  Otherwise
+             * display the remaining balance and keep the confirm button
+             * disabled.
+             */
+            const tolerance = 0.01;
+            if (remaining <= -tolerance) {
+                remainingEl.className = 'text-xl font-bold text-yellow-500';
+                remainingEl.textContent = `Cambio: ${formatCurrency(Math.abs(remaining))}`;
+                confirmBtn.disabled = false;
+            } else if (remaining <= tolerance) {
+                remainingEl.className = 'text-xl font-bold text-green-500';
+                remainingEl.textContent = '¡Pagado!';
+                confirmBtn.disabled = false;
+            } else {
+                remainingEl.className = 'text-xl font-bold text-red-500';
+                remainingEl.textContent = `Restante: ${formatCurrency(remaining)}`;
+                confirmBtn.disabled = true;
+            }
         }
 
         function openQuantityModal(product) {
@@ -1257,7 +1318,9 @@
         }
         
         function lockUIBySession() {
-            const locked = !session;
+            // Consideramos que la interfaz está bloqueada sólo si no existe
+            // ninguna sesión activa ni un userId almacenado en localStorage.
+            const locked = !(session || localStorage.getItem('userId'));
             // Update the auth icon colour and shape depending on sign‑in status.
             DOM.authIcon.classList.toggle('text-green-500', !!session);
             DOM.authIcon.innerHTML = session ?
@@ -2369,14 +2432,48 @@
                 addToCart(p, quantity, price); closeModal();
             });
 
-            document.getElementById('btn-finalize').addEventListener('click', () => { if (!session) { showToast('Debes iniciar sesión'); return; } if (window.cart.length === 0) { showToast('El carrito está vacío'); return; } openPaymentModal(); closeCartDrawer(); });
+            document.getElementById('btn-finalize').addEventListener('click', () => {
+                // Antes de permitir finalizar una venta verificamos que exista
+                // una sesión válida o al menos un identificador de usuario
+                // almacenado (para el modo offline), y que el rol sea
+                // vendedor o administrador.  De este modo, los compradores u
+                // usuarios no autenticados no podrán finalizar ventas.
+                const hasSessionOrStoredId = !!session || !!localStorage.getItem('userId');
+                const roleFromStorage = (() => {
+                    try { return localStorage.getItem('userRole'); } catch { return null; }
+                })();
+                const effectiveRole = userRole || roleFromStorage;
+                const isSellerRole = effectiveRole === 'seller' || effectiveRole === 'admin';
+                if (!hasSessionOrStoredId) {
+                    showToast('Debes iniciar sesión para finalizar la venta');
+                    return;
+                }
+                if (!isSellerRole) {
+                    showToast('No tienes permisos para finalizar una venta');
+                    return;
+                }
+                if (window.cart.length === 0) {
+                    showToast('El carrito está vacío');
+                    return;
+                }
+                openPaymentModal();
+                closeCartDrawer();
+            });
             document.getElementById('confirm-payment-btn').addEventListener('click', async () => {
                 const paymentMethods = {};
                 document.querySelectorAll('.payment-input').forEach(input => {
                     let value = input.value || '';
-                    if (value.includes(',')) {
-                        const parts = value.split(',');
-                        value = parts.shift() + '.' + parts.join('');
+                    // Normalizar números introducidos en distintos formatos:
+                    //  - En muchos móviles en español se utiliza la coma como separador decimal.
+                    //  - Algunos teclados añaden puntos como separadores de miles.
+                    //  Sustituimos todas las comas por puntos y eliminamos los
+                    //  separadores de miles para obtener una cadena numérica limpia.
+                    // Normalización coherente con updatePaymentBalance():
+                    // puntos y comas se tratan según si coexisten o no.
+                    if (value.includes(',') && value.includes('.')) {
+                        value = value.replace(/\./g, '').replace(/,/g, '.');
+                    } else if (value.includes(',')) {
+                        value = value.replace(/,/g, '.');
                     }
                     const amount = value.trim() === '' ? 0 : parseFloat(value);
                     if (!isNaN(amount) && amount > 0) paymentMethods[input.dataset.method] = amount;
