@@ -1068,86 +1068,80 @@
 
         const paymentMethodsConfig = [ { id: 'efectivo_usd', label: 'Efectivo USD', icon: 'fa-money-bill-wave' }, { id: 'efectivo_bs', label: 'Efectivo Bs', icon: 'fa-money-bill-wave' }, { id: 'zelle', label: 'Zelle', icon: 'fa-bolt' }, { id: 'tarjeta', label: 'Tarjeta', icon: 'fa-credit-card' }, { id: 'pago_movil', label: 'Pago Móvil', icon: 'fa-mobile-alt' }, ];
         function openPaymentModal() {
+            // Calcular el total en USD y mostrarlo al usuario.  Se muestra con
+            // formato de moneda para facilitar su lectura.
             const totalUSD = window.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             document.getElementById('payment-total-display').textContent = formatCurrency(totalUSD);
+            // Generar dinámicamente los campos de pago para cada método.  Se
+            // utilizan inputs de tipo "number" con un pequeño paso para
+            // permitir valores decimales.  Se evita establecer
+            // inputmode="decimal" porque en algunos dispositivos esto
+            // restringe en exceso el teclado virtual.
             const container = document.getElementById('payment-methods-container');
             container.innerHTML = '';
             paymentMethodsConfig.forEach(method => {
                 const el = document.createElement('div');
                 el.className = 'flex items-center gap-3';
-                // When generating payment inputs we explicitly allow decimal values and hint to
-                // mobile browsers that a decimal keypad is appropriate.  Without a step
-                // attribute mobile keyboards may only permit integer entry, and many
-                // locales use a comma as the decimal separator which parseFloat does
-                // not understand.  Adding `step="0.01"` and `inputmode="decimal"` fixes
-                // both issues.
-                el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" step="0.01" inputmode="decimal" id="payment-${method.id}" data-method="${method.id}" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
+                el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" step="0.01" id="payment-${method.id}" data-method="${method.id}" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
                 container.appendChild(el);
             });
+            // Suscribirse al evento 'input' para recalcular el saldo en tiempo real.
             container.querySelectorAll('.payment-input').forEach(input => {
                 input.addEventListener('input', updatePaymentBalance);
                 // Algunos navegadores móviles sólo disparan el evento 'change'
-                // al finalizar la edición.  Para asegurar que el saldo se
+                // al finalizar la edición. Para asegurar que el saldo se
                 // actualiza correctamente, escuchamos también este evento.
                 input.addEventListener('change', updatePaymentBalance);
             });
-            updatePaymentBalance(); openModal('payment-modal');
+            // Inicializar la visualización del saldo pendiente.
+            updatePaymentBalance();
+            openModal('payment-modal');
         }
 
         function updatePaymentBalance() {
+            // Calcula el total de la venta en USD sumando precio por cantidad de cada
+            // artículo del carrito.
             const totalUSD = window.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             let paidAmount = 0;
-            // Sum all entered payment amounts.  Mobile browsers in Spanish locales
-            // often use a comma as the decimal separator (e.g. "3,50"), which
-            // `parseFloat` ignores after the comma and results in an integer.  To
-            // support both dot and comma decimals we normalise the string by
-            // replacing the first comma with a dot before parsing.  Also, if the
-            // input is empty or cannot be parsed, treat it as zero.
+            // Suma todos los importes introducidos en los distintos métodos de
+            // pago.  Antes de convertir cada valor a número, se normaliza el
+            // formato para aceptar tanto comas como puntos como separadores
+            // decimales y se eliminan posibles separadores de miles.
             document.querySelectorAll('.payment-input').forEach(input => {
-                let value = input.value || '';
-                // Normalizar formato numérico eliminando separadores de miles y
-                // sustituyendo todas las comas por puntos para soportar
-                // correctamente teclados en español.  De este modo,
-                // entradas como "1.234,56" se convierten en "1234.56".
-                // Si el valor contiene tanto puntos como comas asumimos que los
-                // puntos son separadores de miles y la coma es el separador
-                // decimal (formato europeo).  Eliminamos todos los puntos y
-                // sustituimos la coma por un punto.  En caso contrario, si
-                // sólo hay comas, las tratamos como separadores decimales.
-                // Si sólo hay puntos, se asume formato anglosajón y no se
-                // modifica.
+                let value = (input.value || '').trim();
+                // Si el valor tiene puntos y comas, suponemos formato europeo
+                // (puntos como miles y coma como decimales).  Eliminamos los
+                // puntos y reemplazamos la coma por punto.  Si sólo hay
+                // comas, las tratamos como separadores decimales.  Si sólo
+                // hay puntos, los dejamos tal cual.
                 if (value.includes(',') && value.includes('.')) {
                     value = value.replace(/\./g, '').replace(/,/g, '.');
                 } else if (value.includes(',')) {
                     value = value.replace(/,/g, '.');
                 }
-                const amount = value.trim() === '' ? 0 : parseFloat(value);
+                const amount = parseFloat(value);
                 paidAmount += isNaN(amount) ? 0 : amount;
             });
+            // Calcula el saldo pendiente de pago.
             const remaining = totalUSD - paidAmount;
             const remainingEl = document.getElementById('payment-remaining');
             const confirmBtn = document.getElementById('confirm-payment-btn');
-            /*
-             * Determine the payment status.  On some devices floating point
-             * calculations introduce tiny rounding errors (e.g. 2.4999999)
-             * that prevent the remaining amount from ever reaching exactly
-             * zero.  To avoid leaving the confirm button disabled when the
-             * user has effectively paid the total, treat any absolute
-             * difference up to one cent as fully paid.  If the user has
-             * overpaid (negative remaining), show the change due.  Otherwise
-             * display the remaining balance and keep the confirm button
-             * disabled.
-             */
+            // Define una tolerancia para evitar errores de redondeo en los
+            // cálculos con flotantes.  Si la cantidad restante está dentro
+            // del rango ±tolerancia, se considera completamente pagado.
             const tolerance = 0.01;
             if (remaining <= -tolerance) {
+                // El cliente ha pagado de más y se debe dar cambio.
                 remainingEl.className = 'text-xl font-bold text-yellow-500';
                 remainingEl.textContent = `Cambio: ${formatCurrency(Math.abs(remaining))}`;
                 confirmBtn.disabled = false;
-            } else if (remaining <= tolerance) {
+            } else if (Math.abs(remaining) <= tolerance) {
+                // La diferencia está dentro del margen de error; se considera pagado.
                 remainingEl.className = 'text-xl font-bold text-green-500';
                 remainingEl.textContent = '¡Pagado!';
                 confirmBtn.disabled = false;
             } else {
+                // Aún queda saldo por pagar.
                 remainingEl.className = 'text-xl font-bold text-red-500';
                 remainingEl.textContent = `Restante: ${formatCurrency(remaining)}`;
                 confirmBtn.disabled = true;
