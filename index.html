@@ -1068,84 +1068,43 @@
 
         const paymentMethodsConfig = [ { id: 'efectivo_usd', label: 'Efectivo USD', icon: 'fa-money-bill-wave' }, { id: 'efectivo_bs', label: 'Efectivo Bs', icon: 'fa-money-bill-wave' }, { id: 'zelle', label: 'Zelle', icon: 'fa-bolt' }, { id: 'tarjeta', label: 'Tarjeta', icon: 'fa-credit-card' }, { id: 'pago_movil', label: 'Pago Móvil', icon: 'fa-mobile-alt' }, ];
         function openPaymentModal() {
-            // Calcular el total en USD y mostrarlo al usuario.  Se muestra con
-            // formato de moneda para facilitar su lectura.
             const totalUSD = window.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             document.getElementById('payment-total-display').textContent = formatCurrency(totalUSD);
-            // Generar dinámicamente los campos de pago para cada método.  Se
-            // utilizan inputs de tipo "number" con un pequeño paso para
-            // permitir valores decimales.  Se evita establecer
-            // inputmode="decimal" porque en algunos dispositivos esto
-            // restringe en exceso el teclado virtual.
             const container = document.getElementById('payment-methods-container');
             container.innerHTML = '';
             paymentMethodsConfig.forEach(method => {
                 const el = document.createElement('div');
                 el.className = 'flex items-center gap-3';
-                el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" step="0.01" id="payment-${method.id}" data-method="${method.id}" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
+                // Include a step attribute to allow decimal input on mobile keyboards.
+                // Without step="0.01", some mobile browsers only allow integer input or use
+                // a comma as a decimal separator, which breaks parseFloat().
+                el.innerHTML = `<label for="payment-${method.id}" class="w-1/3 flex items-center gap-2 text-sm text-text-primary"><i class="fas ${method.icon} text-text-secondary"></i> ${method.label}</label><input type="number" id="payment-${method.id}" data-method="${method.id}" step="0.01" class="payment-input modal-input flex-grow p-2" placeholder="0.00">`;
                 container.appendChild(el);
             });
-            // Suscribirse al evento 'input' para recalcular el saldo en tiempo real.
-            container.querySelectorAll('.payment-input').forEach(input => {
-                input.addEventListener('input', updatePaymentBalance);
-                // Algunos navegadores móviles sólo disparan el evento 'change'
-                // al finalizar la edición. Para asegurar que el saldo se
-                // actualiza correctamente, escuchamos también este evento.
-                input.addEventListener('change', updatePaymentBalance);
-            });
-            // Inicializar la visualización del saldo pendiente.
-            updatePaymentBalance();
-            openModal('payment-modal');
+            container.querySelectorAll('.payment-input').forEach(input => input.addEventListener('input', updatePaymentBalance));
+            updatePaymentBalance(); openModal('payment-modal');
         }
 
         function updatePaymentBalance() {
-            // Calcula el total de la venta en USD sumando precio por cantidad de cada
-            // artículo del carrito.
             const totalUSD = window.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            // Sum the values of all payment inputs.  Replace any comma with a dot to
+            // correctly parse numbers entered on mobile devices using a comma
+            // decimal separator.  Without this replacement, parseFloat would stop
+            // parsing at the comma and ignore the decimal part, causing
+            // remaining balances to never reach zero and disabling the confirm button.
             let paidAmount = 0;
-            // Suma todos los importes introducidos en los distintos métodos de
-            // pago.  Antes de convertir cada valor a número, se normaliza el
-            // formato para aceptar tanto comas como puntos como separadores
-            // decimales y se eliminan posibles separadores de miles.
             document.querySelectorAll('.payment-input').forEach(input => {
-                let value = (input.value || '').trim();
-                // Si el valor tiene puntos y comas, suponemos formato europeo
-                // (puntos como miles y coma como decimales).  Eliminamos los
-                // puntos y reemplazamos la coma por punto.  Si sólo hay
-                // comas, las tratamos como separadores decimales.  Si sólo
-                // hay puntos, los dejamos tal cual.
-                if (value.includes(',') && value.includes('.')) {
-                    value = value.replace(/\./g, '').replace(/,/g, '.');
-                } else if (value.includes(',')) {
-                    value = value.replace(/,/g, '.');
+                const raw = input.value || '';
+                const normalized = raw.replace(',', '.');
+                const amount = parseFloat(normalized);
+                if (!isNaN(amount)) {
+                    paidAmount += amount;
                 }
-                const amount = parseFloat(value);
-                paidAmount += isNaN(amount) ? 0 : amount;
             });
-            // Calcula el saldo pendiente de pago.
-            const remaining = totalUSD - paidAmount;
-            const remainingEl = document.getElementById('payment-remaining');
-            const confirmBtn = document.getElementById('confirm-payment-btn');
-            // Define una tolerancia para evitar errores de redondeo en los
-            // cálculos con flotantes.  Si la cantidad restante está dentro
-            // del rango ±tolerancia, se considera completamente pagado.
-            const tolerance = 0.01;
-            if (remaining <= -tolerance) {
-                // El cliente ha pagado de más y se debe dar cambio.
-                remainingEl.className = 'text-xl font-bold text-yellow-500';
-                remainingEl.textContent = `Cambio: ${formatCurrency(Math.abs(remaining))}`;
-                confirmBtn.disabled = false;
-            } else if (Math.abs(remaining) <= tolerance) {
-                // La diferencia está dentro del margen de error; se considera pagado.
-                remainingEl.className = 'text-xl font-bold text-green-500';
-                remainingEl.textContent = '¡Pagado!';
-                confirmBtn.disabled = false;
-            } else {
-                // Aún queda saldo por pagar.
-                remainingEl.className = 'text-xl font-bold text-red-500';
-                remainingEl.textContent = `Restante: ${formatCurrency(remaining)}`;
-                confirmBtn.disabled = true;
-            }
+            const remaining = totalUSD - paidAmount; const remainingEl = document.getElementById('payment-remaining'); const confirmBtn = document.getElementById('confirm-payment-btn');
+            if (Math.abs(remaining) < 0.001) { remainingEl.className = 'text-xl font-bold text-green-500'; remainingEl.textContent = '¡Pagado!'; confirmBtn.disabled = false; }
+            else if (remaining < 0) { remainingEl.className = 'text-xl font-bold text-yellow-500'; remainingEl.textContent = `Cambio: ${formatCurrency(Math.abs(remaining))}`; confirmBtn.disabled = false; }
+            else { remainingEl.className = 'text-xl font-bold text-red-500'; remainingEl.textContent = `Restante: ${formatCurrency(remaining)}`; confirmBtn.disabled = true; }
         }
 
         function openQuantityModal(product) {
@@ -1291,7 +1250,6 @@
         }
         
         function lockUIBySession() {
-            // La interfaz se bloquea cuando no hay sesión activa.
             const locked = !session;
             // Update the auth icon colour and shape depending on sign‑in status.
             DOM.authIcon.classList.toggle('text-green-500', !!session);
@@ -1947,17 +1905,9 @@
                 lockUIBySession();
                 // Refresh user role and update UI whenever the auth session changes
                 if (session) {
-                    // If a user has signed in, fetch role from the database and update UI.
                     fetchUserRole().then(updateUIByRole);
                 } else {
-                    // When the user signs out, clear cached role and id so that
-                    // seller/admin options disappear immediately and offline
-                    // data does not persist erroneously.
                     userRole = null;
-                    try {
-                        localStorage.removeItem('userRole');
-                        localStorage.removeItem('userId');
-                    } catch {}
                     updateUIByRole();
                 }
                 if (sessionChanged && newSession) {
@@ -2391,60 +2341,16 @@
 
             document.getElementById('quantity-modal-confirm').addEventListener('click', () => {
                 const p = allProducts.find(p => p.id === document.getElementById('quantity-product-id').value); if(!p) return;
-                let qtyValue = document.getElementById('quantity-input').value;
-                if (qtyValue.includes(',')) {
-                    const parts = qtyValue.split(',');
-                    qtyValue = parts.shift() + '.' + parts.join('');
-                }
-                const quantity = parseFloat(qtyValue);
-                if (isNaN(quantity) || quantity <= 0) { showToast('Cantidad inválida'); return; }
+                const quantity = parseFloat(document.getElementById('quantity-input').value); if (isNaN(quantity) || quantity <= 0) { showToast('Cantidad inválida'); return; }
                 let price = p.price;
-                if (p.allow_manual_price) {
-                    let priceVal = document.getElementById('manual-price-input').value;
-                    if (priceVal.includes(',')) {
-                        const parts = priceVal.split(',');
-                        priceVal = parts.shift() + '.' + parts.join('');
-                    }
-                    const newPrice = parseFloat(priceVal);
-                    if(isNaN(newPrice) || newPrice < 0){ showToast('Precio inválido'); return; }
-                    price = newPrice;
-                }
+                if (p.allow_manual_price) { const newPrice = parseFloat(document.getElementById('manual-price-input').value); if(isNaN(newPrice) || newPrice < 0){ showToast('Precio inválido'); return; } price = newPrice; }
                 addToCart(p, quantity, price); closeModal();
             });
 
-            document.getElementById('btn-finalize').addEventListener('click', () => {
-                // Debes iniciar sesión para finalizar la venta.
-                if (!session) {
-                    showToast('Debes iniciar sesión');
-                    return;
-                }
-                // Impide finalizar cuando el carrito está vacío.
-                if (window.cart.length === 0) {
-                    showToast('El carrito está vacío');
-                    return;
-                }
-                openPaymentModal();
-                closeCartDrawer();
-            });
+            document.getElementById('btn-finalize').addEventListener('click', () => { if (!session) { showToast('Debes iniciar sesión'); return; } if (window.cart.length === 0) { showToast('El carrito está vacío'); return; } openPaymentModal(); closeCartDrawer(); });
             document.getElementById('confirm-payment-btn').addEventListener('click', async () => {
                 const paymentMethods = {};
-                document.querySelectorAll('.payment-input').forEach(input => {
-                    let value = input.value || '';
-                    // Normalizar números introducidos en distintos formatos:
-                    //  - En muchos móviles en español se utiliza la coma como separador decimal.
-                    //  - Algunos teclados añaden puntos como separadores de miles.
-                    //  Sustituimos todas las comas por puntos y eliminamos los
-                    //  separadores de miles para obtener una cadena numérica limpia.
-                    // Normalización coherente con updatePaymentBalance():
-                    // puntos y comas se tratan según si coexisten o no.
-                    if (value.includes(',') && value.includes('.')) {
-                        value = value.replace(/\./g, '').replace(/,/g, '.');
-                    } else if (value.includes(',')) {
-                        value = value.replace(/,/g, '.');
-                    }
-                    const amount = value.trim() === '' ? 0 : parseFloat(value);
-                    if (!isNaN(amount) && amount > 0) paymentMethods[input.dataset.method] = amount;
-                });
+                document.querySelectorAll('.payment-input').forEach(input => { const amount = parseFloat(input.value) || 0; if (amount > 0) paymentMethods[input.dataset.method] = amount; });
                 if (await safeRecordSale(paymentMethods)) { clearCartAndNotify(); closeModal(); }
             });
             document.getElementById('btn-wa').addEventListener('click', async () => {
