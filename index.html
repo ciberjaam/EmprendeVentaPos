@@ -686,19 +686,10 @@
          */
         function updateUIByRole() {
             // Determine role flags.  Administrators inherit seller permissions.
-            // Si userRole no está definido (por ejemplo, al usar la aplicación
-            // offline) se intenta recuperar el rol almacenado en localStorage.
-            let effectiveRole = userRole;
-            try {
-                if (!effectiveRole) {
-                    const storedRole = localStorage.getItem('userRole');
-                    if (storedRole) effectiveRole = storedRole;
-                }
-            } catch {}
-            const isAdmin  = effectiveRole === 'admin';
-            const isSeller = effectiveRole === 'seller' || isAdmin;
+            const isAdmin  = userRole === 'admin';
+            const isSeller = userRole === 'seller' || isAdmin;
             // Consider unauthenticated visitors as buyers so they can view the catalog
-            const isBuyer  = !session || effectiveRole === 'buyer';
+            const isBuyer  = !session || userRole === 'buyer';
 
             // Gestión del catálogo sólo para administradores
             const manageBtn = document.getElementById('btn-manage-products');
@@ -729,23 +720,11 @@
             }
 
             // Opciones de venta (finalizar venta y WhatsApp) accesibles para vendedores y administradores.
-            //
-            // En PWAs y dispositivos móviles a menudo se pierde la sesión de Supabase
-            // cuando no hay conexión, pero aún puede existir un identificador de usuario
-            // guardado en localStorage (userId).  Si solo comprobamos `session`, los
-            // botones de finalizar venta y WhatsApp permanecen ocultos u inhabilitados
-            // a pesar de que el usuario ya inició sesión previamente.  Para mejorar
-            // la experiencia offline, determinamos la visibilidad y el estado de
-            // estos botones considerando tanto la sesión actual como un userId
-            // almacenado.  Sólo cuando el usuario es vendedor o administrador y
-            // existe una sesión o un ID almacenado se muestran y habilitan los
-            // botones de venta.
             ['btn-finalize', 'btn-wa'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) {
-                    const hasSessionOrStoredId = !!session || !!localStorage.getItem('userId');
-                    el.classList.toggle('hidden', !isSeller || !hasSessionOrStoredId);
-                    el.disabled = !hasSessionOrStoredId || !isSeller;
+                    el.classList.toggle('hidden', !isSeller || !session);
+                    el.disabled = !session || !isSeller;
                 }
             });
             // El resumen del día sólo lo ve el administrador
@@ -1318,9 +1297,8 @@
         }
         
         function lockUIBySession() {
-            // Consideramos que la interfaz está bloqueada sólo si no existe
-            // ninguna sesión activa ni un userId almacenado en localStorage.
-            const locked = !(session || localStorage.getItem('userId'));
+            // La interfaz se bloquea cuando no hay sesión activa.
+            const locked = !session;
             // Update the auth icon colour and shape depending on sign‑in status.
             DOM.authIcon.classList.toggle('text-green-500', !!session);
             DOM.authIcon.innerHTML = session ?
@@ -1975,9 +1953,17 @@
                 lockUIBySession();
                 // Refresh user role and update UI whenever the auth session changes
                 if (session) {
+                    // If a user has signed in, fetch role from the database and update UI.
                     fetchUserRole().then(updateUIByRole);
                 } else {
+                    // When the user signs out, clear cached role and id so that
+                    // seller/admin options disappear immediately and offline
+                    // data does not persist erroneously.
                     userRole = null;
+                    try {
+                        localStorage.removeItem('userRole');
+                        localStorage.removeItem('userId');
+                    } catch {}
                     updateUIByRole();
                 }
                 if (sessionChanged && newSession) {
@@ -2433,25 +2419,12 @@
             });
 
             document.getElementById('btn-finalize').addEventListener('click', () => {
-                // Antes de permitir finalizar una venta verificamos que exista
-                // una sesión válida o al menos un identificador de usuario
-                // almacenado (para el modo offline), y que el rol sea
-                // vendedor o administrador.  De este modo, los compradores u
-                // usuarios no autenticados no podrán finalizar ventas.
-                const hasSessionOrStoredId = !!session || !!localStorage.getItem('userId');
-                const roleFromStorage = (() => {
-                    try { return localStorage.getItem('userRole'); } catch { return null; }
-                })();
-                const effectiveRole = userRole || roleFromStorage;
-                const isSellerRole = effectiveRole === 'seller' || effectiveRole === 'admin';
-                if (!hasSessionOrStoredId) {
-                    showToast('Debes iniciar sesión para finalizar la venta');
+                // Debes iniciar sesión para finalizar la venta.
+                if (!session) {
+                    showToast('Debes iniciar sesión');
                     return;
                 }
-                if (!isSellerRole) {
-                    showToast('No tienes permisos para finalizar una venta');
-                    return;
-                }
+                // Impide finalizar cuando el carrito está vacío.
                 if (window.cart.length === 0) {
                     showToast('El carrito está vacío');
                     return;
