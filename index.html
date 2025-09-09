@@ -2361,7 +2361,36 @@
                 addToCart(p, quantity, price); closeModal();
             });
 
-            document.getElementById('btn-finalize').addEventListener('click', () => { if (!session) { showToast('Debes iniciar sesión'); return; } if (window.cart.length === 0) { showToast('El carrito está vacío'); return; } openPaymentModal(); closeCartDrawer(); });
+            // Handler for initiating payment (Finalizar).  On mobile/PWA there
+            // may be no active Supabase session when offline, so fall back
+            // to localStorage to determine if a user ID exists.  If neither
+            // a session nor stored ID is present, prompt the user to sign in.
+            const handleFinalizeSale = () => {
+                // Use stored user ID if there is no active session.  This
+                // allows offline or PWA usage to continue functioning even
+                // after reloads without a fresh Supabase session.
+                const storedId = localStorage.getItem('userId');
+                const userId = (session && session.user && session.user.id) || storedId;
+                if (!userId) {
+                    showToast('Debes iniciar sesión');
+                    return;
+                }
+                if (window.cart.length === 0) {
+                    showToast('El carrito está vacío');
+                    return;
+                }
+                openPaymentModal();
+                closeCartDrawer();
+            };
+            const finalizeBtnEl = document.getElementById('btn-finalize');
+            finalizeBtnEl.addEventListener('click', handleFinalizeSale);
+            // Attach touchstart for mobile devices so the finalize action
+            // triggers on tap.  preventDefault() stops duplicate events on
+            // some browsers.
+            finalizeBtnEl.addEventListener('touchstart', e => {
+                e.preventDefault();
+                handleFinalizeSale();
+            });
             // Handler for confirming the payment.  Extracts the amounts from
             // each payment input and calls safeRecordSale().  Defined once
             // to reuse for both click and touch events.
